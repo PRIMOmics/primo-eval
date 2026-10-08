@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.metrics import roc_auc_score
 
 from primomics import evaluate as ev
 from primomics.errors import EvaluatorError, SubmissionError
@@ -248,11 +249,16 @@ def test_unknown_metric_raises_evaluator_error():
         ev.score_task(task, labels, _emb_frame(emb, ids))
 
 
+def _one_class_first_fold():
+    """36 samples in 3 folds of 12, large enough for CV: fold 0 holds only 0s."""
+    return np.concatenate([np.zeros(12, dtype=int), np.tile([0, 1], 12)])
+
+
 def test_a_test_fold_with_one_class_is_our_error():
     """The folds are ours: a fold that cannot be scored must not cost the submitter."""
-    y = np.array([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1])
-    folds = np.repeat([0, 1, 2], 4)
-    emb = np.random.default_rng(8).normal(size=(12, 3))
+    y = _one_class_first_fold()
+    folds = np.repeat([0, 1, 2], 12)
+    emb = np.random.default_rng(8).normal(size=(36, 3))
     task = _task("t901", "d901", "classification", "auroc")
     with pytest.raises(EvaluatorError, match="CV fold 0 holds a single label value"):
         ev.score_task(task, _labels(y, folds), _emb_frame(emb))
@@ -660,12 +666,11 @@ def test_a_degenerate_transfer_score_is_invalid(tmp_path):
 
 def test_a_broken_fold_stops_the_scoring(tmp_path):
     """Our error is raised, never recorded as the submitter's invalid task."""
-    y = np.array([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1])
-    labels = _labels(y, np.repeat([0, 1, 2], 4))
+    labels = _labels(_one_class_first_fold(), np.repeat([0, 1, 2], 12))
     ids = list(labels[SAMPLE_ID])
     _write_csv(
         tmp_path / "s.csv",
-        {"d901": (ids, np.random.default_rng(8).normal(size=(12, 3)))},
+        {"d901": (ids, np.random.default_rng(8).normal(size=(36, 3)))},
     )
     with pytest.raises(EvaluatorError, match="single label value"):
         ev.score_all(
@@ -1208,3 +1213,134 @@ def test_an_unreadable_reference_is_our_error(tmp_path):
             tasks=tasks,
             fetch_labels=fetch,
         )
+
+
+def _fixed_probe(scores, seen):
+    """A probe that ignores training and returns a fixed score per row."""
+
+    def fit_predict(task_type, x_train, y_train, x_test, classes, groups_train):
+        seen.append((x_train[:, 0].astype(int), x_test[:, 0].astype(int), groups_train))
+        positive = scores[x_test[:, 0].astype(int)]
+        return np.column_stack([1 - positive, positive])
+
+    return fit_predict
+
+
+def _small_cohort(n_subjects, samples_per_subject):
+    rng = np.random.default_rng(0)
+    subjects = np.repeat([f"p{i}" for i in range(n_subjects)], samples_per_subject)
+    y = np.repeat(rng.permutation(np.arange(n_subjects) % 2), samples_per_subject)
+    labels = _labels(y, _folds(len(y), 3), subjects=subjects)
+    return labels, np.arange(len(y))[:, None].astype(float), rng.random(len(y))
+
+
+def _lpo(labels, matrix):
+    y = labels[ev.LABEL].to_numpy()
+    groups = ev._subject_groups(labels)
+    return ev._leave_pair_out_score(y, groups, matrix, np.array([0, 1]))
+
+
+@pytest.mark.parametrize("samples_per_subject", [1, 3])
+def test_leave_pair_out_with_a_fixed_probe_equals_the_auroc(
+    monkeypatch, samples_per_subject
+):
+    labels, matrix, scores = _small_cohort(10, samples_per_subject)
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    assert _lpo(labels, matrix) == pytest.approx(
+        roc_auc_score(labels[ev.LABEL], scores)
+    )
+
+
+def test_leave_pair_out_holds_out_whole_subjects_and_groups_the_probe(monkeypatch):
+    labels, matrix, scores = _small_cohort(8, 2)
+    seen = []
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, seen))
+    _lpo(labels, matrix)
+    groups = ev._subject_groups(labels)
+    assert len(seen) == 4 * 4
+    for train, test, groups_train in seen:
+        assert len(np.unique(groups[test])) == 2
+        assert set(groups[train]).isdisjoint(groups[test])
+        assert groups_train.tolist() == groups[train].tolist()
+
+
+def test_small_binary_task_with_signal_scores_one_split():
+    y = np.arange(8) % 2
+    emb = np.random.default_rng(0).normal(size=(8, 2))
+    emb[:, 0] += 3.0 * y
+    task = _task("t901", "d901", "classification", "auroc")
+    result = ev.score_task(task, _labels(y, _folds(8, 3)), _emb_frame(emb))
+    assert result.repeat_scores == (result.score,)
+    assert result.n_samples == 8
+    assert result.score > 0.8
+
+
+def _protocol(monkeypatch, task, labels):
+    monkeypatch.setattr(ev, "_leave_pair_out_score", lambda *_: 0.25)
+    monkeypatch.setattr(ev, "_repeated_cv_scores", lambda **_: (0.75,) * 10)
+    result = ev.score_task(task, labels, _emb_frame(np.ones((len(labels), 2))))
+    return "lpo" if result.repeat_scores == (0.25,) else "cv"
+
+
+@pytest.mark.parametrize(("n", "expected"), [(29, "lpo"), (30, "cv")])
+def test_binary_tasks_under_20_training_samples_use_leave_pair_out(
+    monkeypatch, n, expected
+):
+    labels = _labels(np.arange(n) % 2, _folds(n, 3))
+    task = _task("t901", "d901", "classification", "auroc")
+    assert _protocol(monkeypatch, task, labels) == expected
+
+
+def test_the_smallest_training_fold_of_any_repeat_decides(monkeypatch):
+    uneven = np.repeat([0, 1, 2], [11, 10, 9])
+    labels = _labels(np.arange(30) % 2, _folds(30, 3), repeat_folds=[uneven])
+    task = _task("t901", "d901", "classification", "auroc")
+    assert _protocol(monkeypatch, task, labels) == "lpo"
+
+
+@pytest.mark.parametrize(
+    ("task_type", "metric", "y"),
+    [
+        ("classification", "auroc", np.arange(12) % 3),
+        ("regression", "pearson", np.linspace(0.0, 1.0, 12)),
+    ],
+)
+def test_small_multiclass_and_regression_tasks_keep_cv(
+    monkeypatch, task_type, metric, y
+):
+    task = _task("t901", "d901", task_type, metric)
+    assert _protocol(monkeypatch, task, _labels(y, _folds(12, 3))) == "cv"
+
+
+def test_a_non_finite_leave_pair_out_score_is_invalid(monkeypatch):
+    labels, matrix, scores = _small_cohort(4, 1)
+    scores[:] = np.nan
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    with pytest.raises(SubmissionError, match="non-finite"):
+        _lpo(labels, matrix)
+
+
+def test_leave_pair_out_needs_one_label_per_subject():
+    labels = _labels(
+        np.array([0, 1, 1, 0]), _folds(4, 2), subjects=["p0", "p0", "p1", "p2"]
+    )
+    with pytest.raises(EvaluatorError, match="more than one label"):
+        _lpo(labels, np.ones((4, 2)))
+
+
+def test_leave_pair_out_counts_ties_as_half(monkeypatch):
+    labels, matrix, _ = _small_cohort(6, 1)
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(np.full(6, 0.5), []))
+    assert _lpo(labels, matrix) == 0.5
+
+
+def test_leave_pair_out_weights_each_subject_pair_by_its_sample_pairs(monkeypatch):
+    """Uneven samples per subject: the score is still the sample-level AUROC."""
+    sizes = np.array([1, 3, 2, 1, 3, 2, 2, 1])
+    subjects = np.repeat([f"p{i}" for i in range(8)], sizes)
+    y = np.repeat(np.arange(8) % 2, sizes)
+    labels = _labels(y, _folds(len(y), 3), subjects=subjects)
+    scores = np.random.default_rng(1).random(len(y))
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    matrix = np.arange(len(y))[:, None].astype(float)
+    assert _lpo(labels, matrix) == pytest.approx(roc_auc_score(y, scores))

@@ -1,11 +1,13 @@
 """Score a submission: each task with the probe, then per-family means and coverage.
 
-A task is scored over its frozen CV folds, or over a fixed transfer split. A
+A task is scored over its frozen CV folds, or over a fixed transfer split. Binary
+tasks too small for their folds use leave-pair-out over subject pairs instead. A
 perturbation task decodes a hidden response matrix instead of one label. The
 caller passes the datasets, the tasks and functions that return a task's labels
 and responses, so this module never knows where they are stored.
 """
 
+import itertools
 import logging
 import time
 from collections import defaultdict
@@ -58,6 +60,7 @@ REPRESENTATIONS = (EMBEDDING, GENE_SPACE)
 
 OUTER_CV_JOBS = min(10, cpu_count())
 OUTER_PARALLEL_MIN_SAMPLES = 30
+MIN_CV_TRAIN_SAMPLES = 20
 PERTURBATION_TEST_Z_CLIP = 20.0
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF = 1.0
@@ -324,6 +327,69 @@ def _repeated_cv_scores(
     return tuple(float(score) for score in scores)
 
 
+def _min_train_samples(labels: pd.DataFrame) -> int:
+    """Return the size of the smallest training side over every frozen fold."""
+    return min(
+        int((labels[column] != fold).sum())
+        for column in _fold_columns(labels)
+        for fold in labels[column].unique()
+    )
+
+
+def _uses_leave_pair_out(metric: str, labels: pd.DataFrame) -> bool:
+    """Is this a binary AUROC task whose folds leave too few training samples?"""
+    return (
+        metric == "auroc"
+        and labels[LABEL].nunique() == 2
+        and _min_train_samples(labels) < MIN_CV_TRAIN_SAMPLES
+    )
+
+
+def _subject_labels(y: np.ndarray, subjects: np.ndarray) -> pd.Series:
+    """Return one label per subject, indexed by subject id."""
+    per_subject = pd.Series(y).groupby(subjects)
+    if (per_subject.nunique() > 1).any():
+        raise EvaluatorError("a subject carries more than one label")
+    return per_subject.first()
+
+
+def _ranked_pairs(scores: np.ndarray, is_positive: np.ndarray) -> tuple[float, int]:
+    """Count correctly ordered positive-negative sample pairs, ties as half."""
+    gaps = scores[is_positive][:, None] - scores[~is_positive][None, :]
+    if not np.isfinite(gaps).all():
+        raise SubmissionError("a leave-pair-out fit produced a non-finite score")
+    return float((gaps > 0).sum() + 0.5 * (gaps == 0).sum()), int(gaps.size)
+
+
+def _leave_pair_out_score(
+    y: np.ndarray, groups: np.ndarray, matrix: np.ndarray, classes: np.ndarray
+) -> float:
+    """Fraction of sample pairs ranked right, each subject pair held out once.
+
+    The probe is fit on every other subject, with its inner penalty search
+    grouped by subject as in CV.
+    """
+    per_subject = _subject_labels(y, groups)
+    correct, total = 0.0, 0
+    for positive, negative in itertools.product(
+        per_subject.index[per_subject == classes[1]],
+        per_subject.index[per_subject == classes[0]],
+    ):
+        held_out = np.isin(groups, [positive, negative])
+        scores = fit_predict(
+            "classification",
+            matrix[~held_out],
+            y[~held_out],
+            matrix[held_out],
+            classes,
+            groups[~held_out],
+        )[:, 1]
+        pair_correct, pair_total = _ranked_pairs(scores, groups[held_out] == positive)
+        correct += pair_correct
+        total += pair_total
+    return correct / total
+
+
 def _transfer_predict(
     task_type: str,
     y: np.ndarray,
@@ -523,7 +589,7 @@ def score_task(
     emb: pd.DataFrame,
     targets: PerturbationTargets | None = None,
 ) -> TaskScore:
-    """Score one task: repeated fold-wise CV, or a fixed transfer split."""
+    """Score one task: repeated fold-wise CV, leave-pair-out, or a transfer split."""
     metric = task["metric"]
     if task.get("task_type") == PERTURBATION:
         if metric not in {CENTERED_SPEARMAN, RESIDUAL_SPEARMAN}:
@@ -539,6 +605,7 @@ def score_task(
     task_type = task["task_type"]
     matrix = _align(labels, emb)
     y = labels[LABEL].to_numpy()
+    y_eval = y
     classes = np.unique(y) if task_type == "classification" else np.array([])
     groups = _subject_groups(labels)
 
@@ -556,6 +623,9 @@ def score_task(
         except ValueError as error:
             raise SubmissionError(f"transfer task not scoreable: {error}") from error
         repeat_scores = (score,)
+    elif _uses_leave_pair_out(metric, labels):
+        score = _leave_pair_out_score(y, groups, matrix, classes)
+        repeat_scores = (score,)
     else:
         repeat_scores = _repeated_cv_scores(
             task_type=task_type,
@@ -566,7 +636,6 @@ def score_task(
             classes=classes,
         )
         score = float(np.mean(repeat_scores))
-        y_eval = y
 
     return TaskScore(
         task_id=norm_id(task[TASK_ID]),
