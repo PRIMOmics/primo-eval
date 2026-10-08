@@ -1068,3 +1068,143 @@ def test_a_perturbation_task_without_fetch_targets_is_our_error(tmp_path):
             tasks=[_perturbation_task()],
             fetch_labels=lambda task_id: _perturbation_labels(ids, _folds(6, 3)),
         )
+
+
+def _reference_for(path, out, width=3, seed=5):
+    """Random gene-space features for every sample of ``path``, rows shuffled."""
+    frame = pd.read_csv(path)[[DATASET_ID, SAMPLE_ID]].sample(
+        frac=1.0, random_state=seed
+    )
+    rng = np.random.default_rng(seed)
+    for column in range(width):
+        frame[f"g{column}"] = rng.lognormal(size=len(frame))
+    frame.to_csv(out, index=False)
+    return out
+
+
+def test_reference_is_joined_by_sample_then_the_row_is_unit_norm():
+    emb = pd.DataFrame([[0.6, 0.8], [1.0, 0.0]], index=["s0", "s1"])
+    reference = pd.DataFrame(
+        [[0.0, 2.0], [5.0, 0.0], [1.0, 1.0]], index=["s1", "s0", "s9"]
+    )
+
+    joined = ev._concat_reference(emb, reference)
+
+    assert list(joined.index) == ["s0", "s1"]
+    assert joined.shape[1] == 4
+    np.testing.assert_allclose(np.linalg.norm(joined, axis=1), 1.0)
+    np.testing.assert_allclose(joined.loc["s1"], np.array([1, 0, 0, 2]) / np.sqrt(5))
+
+
+def test_reference_scoring_normalizes_the_embedding_block_first(tmp_path):
+    """Rescaling a patient's embedding must not change its weight against HVG."""
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path, signal=True)
+    reference = _reference_for(path, tmp_path / "reference.csv")
+    frame = pd.read_csv(path)
+    dims = [c for c in frame.columns if c not in {DATASET_ID, SAMPLE_ID}]
+    frame.loc[::2, dims] = frame.loc[::2, dims] * 7.0
+    frame.to_csv(tmp_path / "scaled.csv", index=False)
+
+    kwargs = {"datasets": datasets, "tasks": tasks, "fetch_labels": fetch}
+    plain = ev.score_all(path, reference=reference, **kwargs)
+    stretched = ev.score_all(tmp_path / "scaled.csv", reference=reference, **kwargs)
+    alone = ev.score_all(path, **kwargs)
+
+    assert plain["full_coverage"] is True
+    assert [round(t.score, 10) for t in plain["per_task"]] == [
+        round(t.score, 10) for t in stretched["per_task"]
+    ]
+    assert [t.score for t in plain["per_task"]] != [t.score for t in alone["per_task"]]
+
+
+def test_reference_scores_match_the_live_evaluator(tmp_path):
+    """The live evaluator's '+ HVG' scores on fixed data, reference rows reversed."""
+    cls_task, cls_labels, emb = _fixed_task("classification")
+    reg_task, reg_labels, _ = _fixed_task("regression")
+    ids = list(emb.index)
+    _write_csv(tmp_path / "sub.csv", {"d901": (ids, emb.to_numpy())})
+    rows = np.arange(60)
+    latent = np.sin(0.9 * (rows // 2))
+    genes = np.exp(
+        np.sin(np.outer(rows + 3, np.arange(1, 6)) * 0.45) + 0.5 * latent[:, None]
+    )
+    reference = pd.DataFrame(genes, columns=[f"g{j}" for j in range(5)])
+    reference.insert(0, SAMPLE_ID, ids)
+    reference.insert(0, DATASET_ID, "d901")
+    reference.iloc[::-1].to_csv(tmp_path / "reference.csv", index=False)
+
+    res = ev.score_all(
+        tmp_path / "sub.csv",
+        datasets=[{"id": "d901"}],
+        tasks=[cls_task, {**reg_task, "dataset_id": "d901"}],
+        fetch_labels={"t901": cls_labels, "t902": reg_labels}.__getitem__,
+        reference=tmp_path / "reference.csv",
+    )
+
+    scores = {score.task_id: score.score for score in res["per_task"]}
+    assert scores["t901"] == pytest.approx(0.8951974206349208, abs=1e-9)
+    assert scores["t902"] == pytest.approx(0.7955713580462145, abs=1e-9)
+
+
+def test_reference_missing_a_dataset_is_our_error(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    reference = _reference_for(path, tmp_path / "reference.csv")
+    frame = pd.read_csv(reference)
+    frame[frame[DATASET_ID] != "d902"].to_csv(reference, index=False)
+
+    with pytest.raises(EvaluatorError, match="d902"):
+        ev.score_all(
+            path,
+            reference=reference,
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )
+
+
+def test_reference_missing_a_labelled_sample_is_our_error(tmp_path):
+    """A gap in our features must not be blamed on the submission."""
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    reference = _reference_for(path, tmp_path / "reference.csv")
+    pd.read_csv(reference).iloc[1:].to_csv(reference, index=False)
+
+    with pytest.raises(EvaluatorError, match="reference features lack 1/"):
+        ev.score_all(
+            path,
+            reference=reference,
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )
+
+
+def test_a_reference_with_nan_is_our_error(tmp_path):
+    """A NaN in our features must not be blamed on the submission."""
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    reference = _reference_for(path, tmp_path / "reference.csv")
+    frame = pd.read_csv(reference)
+    frame.loc[0, "g1"] = np.nan
+    frame.to_csv(reference, index=False)
+
+    with pytest.raises(EvaluatorError, match="NaN or inf"):
+        ev.score_all(
+            path,
+            reference=reference,
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )
+
+
+def test_an_unreadable_reference_is_our_error(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    (tmp_path / "reference.csv").write_text("sample_id,g0\na,1.0\n")
+
+    with pytest.raises(EvaluatorError, match="could not load the reference"):
+        ev.score_all(
+            path,
+            reference=tmp_path / "reference.csv",
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )

@@ -151,6 +151,56 @@ def _subject_groups(labels: pd.DataFrame) -> np.ndarray:
     return groups
 
 
+def _load_reference(path: str | Path) -> dict[str, pd.DataFrame]:
+    """Read the gene-space reference concatenated to submissions, by dataset.
+
+    The reference is ours, so any defect in it is an ``EvaluatorError``.
+    """
+    try:
+        reference = {
+            dataset_id: to_embedding_frame(block)
+            for dataset_id, block in load_submission(path).items()
+        }
+    except (OSError, ValueError) as error:
+        message = f"could not load the reference features: {error}"
+        raise EvaluatorError(message) from error
+    non_finite = sorted(
+        dataset_id
+        for dataset_id, frame in reference.items()
+        if not np.isfinite(frame.to_numpy()).all()
+    )
+    if non_finite:
+        raise EvaluatorError(f"reference features hold NaN or inf values: {non_finite}")
+    return reference
+
+
+def _concat_reference(emb: pd.DataFrame, reference: pd.DataFrame) -> pd.DataFrame:
+    """Append the reference columns to each sample, then L2-normalize the row.
+
+    Samples absent from either side are dropped, so a labelled sample the
+    submission lacks still fails ``_align`` exactly as without a reference. One
+    the reference lacks is caught first by ``_check_reference_covers``.
+    """
+    joined = emb.add_prefix("model_").join(
+        reference.add_prefix("reference_"), how="inner"
+    )
+    return l2_normalize_rows(joined)
+
+
+def _check_reference_covers(
+    labels: pd.DataFrame, reference: pd.DataFrame, task_id: str
+) -> None:
+    """Raise if the reference lacks a labelled sample: that defect is ours."""
+    lab_ids = [norm_id(v) for v in labels[SAMPLE_ID]]
+    present = set(reference.index)
+    missing = [s for s in lab_ids if s not in present]
+    if missing:
+        raise EvaluatorError(
+            f"reference features lack {len(missing)}/{len(lab_ids)} labelled "
+            f"samples of {task_id}, e.g. {missing[:5]}"
+        )
+
+
 def _align(labels: pd.DataFrame, emb: pd.DataFrame) -> np.ndarray:
     """Return the embedding matrix in labels order, or raise if a sample is missing."""
     lab_ids = [norm_id(v) for v in labels[SAMPLE_ID]]
@@ -571,6 +621,7 @@ def _task_outcome(
     task: dict,
     emb: pd.DataFrame | None,
     block_error: str | None,
+    reference: pd.DataFrame | None,
     fetch_labels: Callable[[str], pd.DataFrame],
     fetch_targets: Callable[[str], PerturbationTargets] | None,
 ) -> TaskOutcome:
@@ -587,6 +638,8 @@ def _task_outcome(
         raise EvaluatorError(
             f"could not load evaluation data for a task: {error}"
         ) from error
+    if reference is not None:
+        _check_reference_covers(labels, reference, task_id)
     targets = None
     if task.get("task_type") == PERTURBATION:
         if fetch_targets is None:
@@ -620,6 +673,7 @@ def score_all(
     fetch_targets: Callable[[str], PerturbationTargets] | None = None,
     modality: str | None = None,
     representation: str = EMBEDDING,
+    reference: str | Path | None = None,
 ) -> dict:
     """Score a submission per task and roll it up into a blind result.
 
@@ -628,7 +682,9 @@ def score_all(
     submitter's). A dataset is embedded once and reused across all its tasks.
 
     ``EMBEDDING`` columns are put on the unit sphere first, ``GENE_SPACE`` ones
-    keep their scale.
+    keep their scale. A ``reference`` file (same layout as a submission, gene
+    space) is then appended to every sample and the concatenated row put back
+    on the unit sphere.
     """
     if representation not in REPRESENTATIONS:
         raise SubmissionError(
@@ -652,12 +708,20 @@ def score_all(
             f"dataset_id(s) outside the selected modality: {wrong_modality}"
         )
 
+    reference_by_ds = _load_reference(reference) if reference is not None else {}
+
     emb_by_ds, block_error = {}, {}
     for dataset_id, block in blocks.items():
         try:
             frame = to_embedding_frame(block)
             if representation == EMBEDDING:
                 frame = l2_normalize_rows(frame)
+            if reference is not None:
+                if dataset_id not in reference_by_ds:
+                    raise EvaluatorError(
+                        f"reference features lack dataset {dataset_id}"
+                    )
+                frame = _concat_reference(frame, reference_by_ds[dataset_id])
             emb_by_ds[dataset_id] = frame
         except SubmissionError as error:
             block_error[dataset_id] = str(error)
@@ -667,6 +731,7 @@ def score_all(
             task,
             emb_by_ds.get(norm_id(task[DATASET_ID])),
             block_error.get(norm_id(task[DATASET_ID])),
+            reference_by_ds.get(norm_id(task[DATASET_ID])),
             fetch_labels,
             fetch_targets,
         )
