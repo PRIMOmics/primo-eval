@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from primomics.metrics import (
+    TaskScore,
+    category_means,
     compute_auroc,
     compute_pearson,
     compute_residual_sample_spearman,
@@ -104,3 +106,42 @@ def test_target_centered_spearman_ignores_a_fixed_gene_offset():
     truth = np.array([[1.0, 4.0, 2.0], [3.0, 2.0, 5.0]])
     biased = truth + np.array([0.0, 10.0, 20.0])
     assert compute_target_centered_sample_spearman(truth, biased) == pytest.approx(1.0)
+
+
+def _score(task_id, dataset_id, category, metric, score):
+    return TaskScore(task_id, dataset_id, category, metric, score, 10)
+
+
+def test_category_means_groups_by_category():
+    scores = [
+        _score("t1", "d1", "treatment_outcome", "auroc", 0.8),
+        _score("t2", "d2", "treatment_outcome", "auroc", 0.6),
+        _score("t3", "d3", "clinical_scores", "pearson", 0.4),
+    ]
+    cats = category_means(scores)
+    assert cats["treatment_outcome"] == {
+        "metric": "auroc",
+        "mean": pytest.approx(0.7),
+        "n_tasks": 2,
+    }
+    assert cats["clinical_scores"]["mean"] == pytest.approx(0.4)
+    assert cats["clinical_scores"]["n_tasks"] == 1
+
+
+def test_category_means_drops_non_finite_from_mean():
+    scores = [
+        _score("t1", "d1", "clinical_scores", "pearson", 0.4),
+        _score("t2", "d2", "clinical_scores", "pearson", float("nan")),
+    ]
+    cats = category_means(scores)
+    assert cats["clinical_scores"]["mean"] == pytest.approx(0.4)
+    assert cats["clinical_scores"]["n_tasks"] == 2
+
+
+def test_category_means_all_non_finite_is_nan():
+    scores = [_score("t1", "d1", "endotype", "auroc", float("nan"))]
+    assert np.isnan(category_means(scores)["endotype"]["mean"])
+
+
+def test_category_means_empty():
+    assert category_means([]) == {}

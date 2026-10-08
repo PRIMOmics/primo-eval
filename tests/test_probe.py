@@ -3,7 +3,7 @@ import pytest
 from sklearn.linear_model import RidgeCV
 
 from primomics import probe
-from primomics.errors import SubmissionError
+from primomics.errors import EvaluatorError
 from primomics.metrics import compute_auroc, compute_pearson
 from primomics.probe import (
     INNER_CV,
@@ -212,7 +212,7 @@ def test_a_class_missing_from_training_gets_a_zero_column():
 
 def test_a_single_class_training_fold_raises():
     groups = np.repeat([f"p{i}" for i in range(6)], 2)
-    with pytest.raises(SubmissionError, match="single class"):
+    with pytest.raises(EvaluatorError, match="single class"):
         fit_predict(
             "classification",
             np.ones((12, 3)),
@@ -227,13 +227,13 @@ def test_a_class_with_one_subject_raises():
     groups = np.repeat([f"p{i}" for i in range(6)], 2)
     y = np.repeat([0, 0, 0, 0, 0, 1], 2)
     x = np.random.default_rng(5).normal(size=(12, 3))
-    with pytest.raises(SubmissionError, match="fewer than two subjects in a class"):
+    with pytest.raises(EvaluatorError, match="fewer than two subjects in a class"):
         fit_predict("classification", x, y, x[:2], np.array([0, 1]), groups)
 
 
 def test_regression_with_one_subject_raises():
     x = np.random.default_rng(6).normal(size=(4, 3))
-    with pytest.raises(SubmissionError, match="fewer than two subjects"):
+    with pytest.raises(EvaluatorError, match="fewer than two subjects"):
         fit_predict(
             "regression", x, np.arange(4.0), x[:1], np.array([]), np.array(["p0"] * 4)
         )

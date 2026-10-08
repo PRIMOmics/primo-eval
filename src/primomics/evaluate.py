@@ -1,5 +1,15 @@
-"""Score one task: the probe over frozen CV folds, or over a fixed transfer split."""
+"""Score a submission: each task with the probe, then per-family means and coverage.
 
+A task is scored over its frozen CV folds, or over a fixed transfer split. The
+caller passes the datasets, the tasks and a function that returns a task's
+labels, so this module never knows where the labels are stored.
+"""
+
+import logging
+import time
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -7,9 +17,16 @@ import pandas as pd
 from joblib import Parallel, cpu_count, delayed, parallel_backend
 
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.metrics import METRICS, TaskScore
+from primomics.metrics import METRICS, TaskScore, category_means
 from primomics.probe import INNER_CV_JOBS, LOGREG_TOL, fit_predict
-from primomics.submission import DATASET_ID, SAMPLE_ID, norm_id
+from primomics.submission import (
+    DATASET_ID,
+    SAMPLE_ID,
+    l2_normalize_rows,
+    load_submission,
+    norm_id,
+    to_embedding_frame,
+)
 
 SUBJECT_ID = "subject_id"
 TASK_ID = "task_id"
@@ -19,8 +36,28 @@ FOLD_PREFIX = f"{FOLD}_"
 SPLIT = "split"
 SPLIT_TRAIN = "train"
 SPLIT_TEST = "test"
+MODALITIES = {"bulk-rna": "bulk RNA", "single-cell-rna": "Single Cell RNA"}
+
+EMBEDDING = "embedding"
+GENE_SPACE = "gene_space"
+REPRESENTATIONS = (EMBEDDING, GENE_SPACE)
 
 OUTER_CV_JOBS = min(10, cpu_count())
+FETCH_ATTEMPTS = 3
+FETCH_BACKOFF = 1.0
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TaskOutcome:
+    """What happened to one scoreable task: scored / missing / invalid."""
+
+    task_id: str
+    dataset_id: str
+    status: str
+    score: TaskScore | None = None
+    reason: str | None = None
 
 
 def _fold_columns(labels: pd.DataFrame) -> list[str]:
@@ -98,6 +135,10 @@ def _fold_score(
     scores = []
     for fold in sorted(np.unique(folds)):
         test = folds == fold
+        if len(np.unique(y[test])) < 2:
+            raise EvaluatorError(
+                f"CV fold {fold} holds a single label value; the folds are ours to fix"
+            )
         predictions = fit_predict(
             task_type,
             matrix[~test],
@@ -198,6 +239,11 @@ def _transfer_predict(
     train, test = split == SPLIT_TRAIN, split == SPLIT_TEST
     if not train.any() or not test.any():
         raise EvaluatorError("transfer labels.csv has an empty train or test side")
+    if len(np.unique(y[test])) < 2:
+        raise EvaluatorError(
+            "the transfer test cohort holds a single label value; the split is ours "
+            "to fix"
+        )
     preds = fit_predict(
         task_type,
         matrix[train],
@@ -255,3 +301,181 @@ def score_task(task: dict, labels: pd.DataFrame, emb: pd.DataFrame) -> TaskScore
         n_samples=len(y_eval),
         repeat_scores=repeat_scores,
     )
+
+
+def manifest_ids(manifest: list[dict], modality: str | None = None) -> set[str]:
+    """Return manifest dataset ids, optionally for one modality."""
+    return {
+        norm_id(entry["id"])
+        for entry in manifest
+        if modality is None or entry.get("modality") == modality
+    }
+
+
+def scoreable_tasks(tasks: list[dict], valid_ids: set[str]) -> list[dict]:
+    """Tasks whose dataset is in the public manifest; orphans are skipped.
+
+    Shared by ``score_all`` and the leaderboard so both agree on what full
+    coverage means. An orphan (a task on a dataset not yet published) is logged
+    and dropped rather than making full coverage unreachable for everyone.
+    """
+    kept, orphans = [], []
+    for task in tasks:
+        if norm_id(task[DATASET_ID]) in valid_ids:
+            kept.append(task)
+        else:
+            orphans.append(norm_id(task[TASK_ID]))
+    if orphans:
+        logger.warning("skipping tasks on unpublished datasets: %s", orphans)
+    return kept
+
+
+def _retry(fn):
+    """Call ``fn``, retrying transient failures with linear backoff."""
+    for attempt in range(FETCH_ATTEMPTS):
+        try:
+            return fn()
+        except Exception:
+            if attempt == FETCH_ATTEMPTS - 1:
+                raise
+            time.sleep(FETCH_BACKOFF * (attempt + 1))
+
+
+def _task_outcome(
+    task: dict,
+    emb: pd.DataFrame | None,
+    block_error: str | None,
+    fetch_labels: Callable[[str], pd.DataFrame],
+) -> TaskOutcome:
+    """Score one task, mapping each failure to the right category."""
+    task_id = norm_id(task[TASK_ID])
+    dataset_id = norm_id(task[DATASET_ID])
+    if emb is None and block_error is None:
+        return TaskOutcome(task_id, dataset_id, "missing")
+    if block_error is not None:
+        return TaskOutcome(task_id, dataset_id, "invalid", reason=block_error)
+    try:
+        labels = _retry(lambda: fetch_labels(task_id))
+    except Exception as error:
+        raise EvaluatorError(
+            f"could not load evaluation data for a task: {error}"
+        ) from error
+    try:
+        score = score_task(task, labels, emb)
+    except SubmissionError as error:
+        return TaskOutcome(task_id, dataset_id, "invalid", reason=str(error))
+    if not np.isfinite(score.score):
+        return TaskOutcome(
+            task_id,
+            dataset_id,
+            "invalid",
+            reason="degenerate score (constant predictions)",
+        )
+    return TaskOutcome(task_id, dataset_id, "scored", score=score)
+
+
+def score_all(
+    path: str | Path,
+    *,
+    datasets: list[dict],
+    tasks: list[dict],
+    fetch_labels: Callable[[str], pd.DataFrame],
+    modality: str | None = None,
+    representation: str = EMBEDDING,
+) -> dict:
+    """Score a submission per task and roll it up into a blind result.
+
+    Unknown dataset ids and bad files raise/record a ``SubmissionError``; a
+    failed fetch or internal error raises ``EvaluatorError`` (our side, not the
+    submitter's). A dataset is embedded once and reused across all its tasks.
+
+    ``EMBEDDING`` columns are put on the unit sphere first, ``GENE_SPACE`` ones
+    keep their scale.
+    """
+    if representation not in REPRESENTATIONS:
+        raise SubmissionError(
+            f"unknown representation '{representation}'; expected one of "
+            f"{list(REPRESENTATIONS)}"
+        )
+    blocks = load_submission(path)
+    if modality is not None and modality not in MODALITIES:
+        raise SubmissionError(f"unknown or unavailable modality: {modality}")
+    all_ids = manifest_ids(datasets)
+    valid = manifest_ids(datasets, MODALITIES.get(modality))
+    if modality is not None and not valid:
+        raise SubmissionError(f"unknown or unavailable modality: {modality}")
+
+    unknown = sorted(set(blocks) - all_ids)
+    if unknown:
+        raise SubmissionError(f"unknown dataset_id(s) not in the benchmark: {unknown}")
+    wrong_modality = sorted(set(blocks) - valid)
+    if wrong_modality:
+        raise SubmissionError(
+            f"dataset_id(s) outside the selected modality: {wrong_modality}"
+        )
+
+    emb_by_ds, block_error = {}, {}
+    for dataset_id, block in blocks.items():
+        try:
+            frame = to_embedding_frame(block)
+            if representation == EMBEDDING:
+                frame = l2_normalize_rows(frame)
+            emb_by_ds[dataset_id] = frame
+        except SubmissionError as error:
+            block_error[dataset_id] = str(error)
+
+    outcomes = [
+        _task_outcome(
+            task,
+            emb_by_ds.get(norm_id(task[DATASET_ID])),
+            block_error.get(norm_id(task[DATASET_ID])),
+            fetch_labels,
+        )
+        for task in scoreable_tasks(tasks, all_ids)
+        if norm_id(task[DATASET_ID]) in valid
+    ]
+    return _summarize(outcomes)
+
+
+def _summarize(outcomes: list[TaskOutcome]) -> dict:
+    """Combine per-task outcomes into blind per-category numbers + coverage."""
+    scored = [o.score for o in outcomes if o.status == "scored"]
+    dataset_status = _dataset_status(outcomes)
+    n_scored, n_total = len(scored), len(outcomes)
+    n_ds_scored = sum(1 for status in dataset_status.values() if status == "scored")
+    return {
+        "per_task": scored,
+        "categories": category_means(scored),
+        "invalid": [
+            {"task_id": o.task_id, "dataset_id": o.dataset_id, "reason": o.reason}
+            for o in outcomes
+            if o.status == "invalid"
+        ],
+        "missing": sorted({o.dataset_id for o in outcomes if o.status == "missing"}),
+        "incomplete": sorted(
+            ds for ds, status in dataset_status.items() if status == "incomplete"
+        ),
+        "coverage": n_scored / n_total if n_total else 0.0,
+        "n_scored": n_scored,
+        "n_total": n_total,
+        "full_coverage": n_total > 0 and n_scored == n_total,
+        "n_datasets_scored": n_ds_scored,
+        "n_datasets_total": len(dataset_status),
+    }
+
+
+def _dataset_status(outcomes: list[TaskOutcome]) -> dict[str, str]:
+    """Blind per-dataset STATUS only (no score): scored / missing / incomplete."""
+    statuses: dict[str, set[str]] = defaultdict(set)
+    for outcome in outcomes:
+        statuses[outcome.dataset_id].add(outcome.status)
+    out = {}
+    for dataset_id in sorted(statuses):
+        seen = statuses[dataset_id]
+        if seen == {"missing"}:
+            out[dataset_id] = "missing"
+        elif seen == {"scored"}:
+            out[dataset_id] = "scored"
+        else:
+            out[dataset_id] = "incomplete"
+    return out

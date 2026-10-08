@@ -4,6 +4,7 @@ AUROC for classification, Pearson for clinical scores, and a sample-wise
 Spearman for perturbation responses.
 """
 
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -114,3 +115,25 @@ class TaskScore:
     n_samples: int
     repeat_scores: tuple[float, ...] = ()
     diagnostics: dict[str, float] = field(default_factory=dict)
+
+
+def category_means(scores: list[TaskScore]) -> dict[str, dict]:
+    """Mean of the native metric per task category.
+
+    A category uses one metric, so this is a plain mean of that metric -- never a
+    mix of native metrics. Degenerate (non-finite) task scores are dropped from
+    the mean. Returns ``{category: {metric, mean, n_tasks}}`` for the categories
+    present in ``scores``.
+    """
+    by_category: dict[str, list[TaskScore]] = defaultdict(list)
+    for score in scores:
+        by_category[score.category].append(score)
+    out = {}
+    for category, items in by_category.items():
+        finite = [s.score for s in items if np.isfinite(s.score)]
+        out[category] = {
+            "metric": items[0].metric,
+            "mean": float(np.mean(finite)) if finite else float("nan"),
+            "n_tasks": len(items),
+        }
+    return out

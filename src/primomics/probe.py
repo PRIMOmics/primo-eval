@@ -10,7 +10,7 @@ from sklearn.linear_model import LogisticRegressionCV, Ridge
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
 
-from primomics.errors import SubmissionError
+from primomics.errors import EvaluatorError
 
 RIDGE_ALPHAS = np.logspace(-6.0, 6.0, 25)
 LOGREG_CS = np.logspace(-6.0, 6.0, 13)
@@ -26,7 +26,7 @@ def _group_inner_cv(groups_train: np.ndarray) -> list[tuple[np.ndarray, np.ndarr
     n_groups = len(np.unique(groups_train))
     n_splits = min(INNER_CV, n_groups)
     if n_splits < 2:
-        raise SubmissionError("an outer training fold has fewer than two subjects")
+        raise EvaluatorError("an outer training fold has fewer than two subjects")
     splitter = GroupKFold(n_splits=n_splits)
     rows = np.zeros(len(groups_train))
     return list(splitter.split(rows, groups=groups_train))
@@ -105,7 +105,7 @@ def _inner_cv(
     support = min(len(np.unique(groups_train[y_train == label])) for label in classes)
     n_splits = min(INNER_CV, support)
     if n_splits < 2:
-        raise SubmissionError(
+        raise EvaluatorError(
             "an outer training fold has fewer than two subjects in a class"
         )
     rows = np.zeros(len(y_train))
@@ -118,7 +118,7 @@ def _inner_cv(
         and set(np.unique(y_train[test])) == expected_classes
         for train, test in splits
     ):
-        raise SubmissionError(
+        raise EvaluatorError(
             "could not construct inner subject-grouped folds with every class"
         )
     return splits
@@ -141,7 +141,7 @@ def fit_predict(
     logreg_tol = LOGREG_TOL if logreg_tol is None else logreg_tol
     if task_type == "classification":
         if len(np.unique(y_train)) < 2:
-            raise SubmissionError("a training fold has a single class")
+            raise EvaluatorError("a training fold has a single class")
         scoring = "roc_auc" if len(classes) == 2 else "roc_auc_ovr_weighted"
         clf = LogisticRegressionCV(
             Cs=LOGREG_CS,

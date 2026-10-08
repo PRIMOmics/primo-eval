@@ -4,7 +4,7 @@ import pytest
 
 from primomics import evaluate as ev
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.submission import SAMPLE_ID
+from primomics.submission import DATASET_ID, SAMPLE_ID
 
 
 def _labels(y, folds, ids=None, repeat_folds=None, subjects=None):
@@ -248,14 +248,25 @@ def test_unknown_metric_raises_evaluator_error():
         ev.score_task(task, labels, _emb_frame(emb, ids))
 
 
-def test_a_test_fold_with_one_class_is_the_submitters_error():
-    """AUROC on one class is NaN in scikit-learn, so the fold has no score."""
+def test_a_test_fold_with_one_class_is_our_error():
+    """The folds are ours: a fold that cannot be scored must not cost the submitter."""
     y = np.array([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1])
     folds = np.repeat([0, 1, 2], 4)
     emb = np.random.default_rng(8).normal(size=(12, 3))
     task = _task("t901", "d901", "classification", "auroc")
-    with pytest.raises(SubmissionError, match="non-finite"):
+    with pytest.raises(EvaluatorError, match="CV fold 0 holds a single label value"):
         ev.score_task(task, _labels(y, folds), _emb_frame(emb))
+
+
+def test_a_transfer_test_cohort_with_one_class_is_our_error():
+    y = np.array([0, 1, 0, 1, 0, 0])
+    split = np.array([ev.SPLIT_TRAIN] * 4 + [ev.SPLIT_TEST] * 2)
+    labels = _transfer_labels(y, split)
+    task = _task("t904", "d904", "classification", "auroc")
+    with pytest.raises(EvaluatorError, match="transfer test cohort"):
+        ev.score_task(
+            task, labels, _emb_frame(np.random.default_rng(3).normal(size=(6, 3)))
+        )
 
 
 def test_constant_predictions_are_the_submitters_error():
@@ -276,13 +287,13 @@ def test_transfer_scoring_signal_and_null():
     assert 0.3 < res0.score < 0.7
 
 
-def test_transfer_single_class_train_raises_submission_error():
+def test_transfer_single_class_train_is_our_error():
     y = np.array([0, 0, 0, 0, 1, 0])
     split = np.array([ev.SPLIT_TRAIN] * 4 + [ev.SPLIT_TEST] * 2)
     ids = [f"s{i}" for i in range(6)]
     emb = np.random.default_rng(0).normal(size=(6, 5))
     task = _task("t904", "d904", "classification", "auroc")
-    with pytest.raises(SubmissionError):
+    with pytest.raises(EvaluatorError, match="single class"):
         ev.score_task(task, _transfer_labels(y, split, ids), _emb_frame(emb, ids))
 
 
@@ -351,3 +362,426 @@ def test_a_badly_named_repeat_fold_column_is_our_error():
     labels["fold_x"] = [0, 1]
     with pytest.raises(EvaluatorError, match="invalid repeat-fold columns"):
         ev._fold_columns(labels)
+
+
+def _write_csv(path, blocks):
+    """blocks = {dataset_id: (ids, matrix)} -> a multi-dataset CSV (NaN-padded)."""
+    frames = []
+    for dataset_id, (ids, mat) in blocks.items():
+        df = pd.DataFrame(mat, columns=[f"e{j}" for j in range(mat.shape[1])])
+        df.insert(0, SAMPLE_ID, ids)
+        df.insert(0, DATASET_ID, dataset_id)
+        frames.append(df)
+    pd.concat(frames, ignore_index=True).to_csv(path, index=False)
+
+
+def _no_fetch(task_id):
+    raise AssertionError("fetch_labels should not have been called")
+
+
+def test_scoreable_tasks_skips_orphans():
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t909", "d999", "regression", "pearson"),
+    ]
+    kept = ev.scoreable_tasks(tasks, {"d901"})
+    assert [t["task_id"] for t in kept] == ["t901"]
+
+
+def _two_task_submission(tmp_path, signal=True):
+    _, cl, cids, cemb = _classification(signal=signal)
+    _, rl, rids, remb = _regression(signal=signal)
+    _write_csv(tmp_path / "sub.csv", {"d901": (cids, cemb), "d902": (rids, remb)})
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t902", "d902", "regression", "pearson"),
+    ]
+    labels_by = {"t901": cl, "t902": rl}
+    datasets = [{"id": "d901"}, {"id": "d902"}]
+    return tmp_path / "sub.csv", datasets, tasks, labels_by.__getitem__
+
+
+def test_score_all_full_coverage_signal(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path, signal=True)
+    res = ev.score_all(path, datasets=datasets, tasks=tasks, fetch_labels=fetch)
+    assert res["full_coverage"] is True
+    assert res["n_scored"] == 2 and res["n_total"] == 2
+    assert res["coverage"] == 1.0
+    assert res["categories"]["treatment_outcome"]["mean"] > 0.8
+    assert res["categories"]["clinical_scores"]["mean"] > 0.6
+    assert set(res["categories"]) == {"treatment_outcome", "clinical_scores"}
+    assert res["missing"] == [] and res["invalid"] == []
+    assert res["incomplete"] == []
+    assert res["n_datasets_scored"] == 2 and res["n_datasets_total"] == 2
+
+
+def test_score_all_matches_the_live_evaluator(tmp_path):
+    """The live evaluator's summary of this submission, read on the unit sphere."""
+    cls_task, cls_labels, emb = _fixed_task("classification")
+    reg_task, reg_labels, _ = _fixed_task("regression")
+    _write_csv(tmp_path / "sub.csv", {"d901": (list(emb.index), emb.to_numpy())})
+    tasks = [
+        cls_task,
+        {**reg_task, "dataset_id": "d901"},
+        _task("t903", "d903", "regression", "pearson"),
+    ]
+    datasets = [
+        {"id": "d901", "modality": "bulk RNA"},
+        {"id": "d903", "modality": "bulk RNA"},
+    ]
+    labels_by = {"t901": cls_labels, "t902": reg_labels}
+
+    res = ev.score_all(
+        tmp_path / "sub.csv",
+        modality="bulk-rna",
+        datasets=datasets,
+        tasks=tasks,
+        fetch_labels=labels_by.__getitem__,
+    )
+
+    assert res["categories"]["treatment_outcome"]["mean"] == pytest.approx(
+        0.9301706349206349, abs=1e-9
+    )
+    assert res["categories"]["clinical_scores"]["mean"] == pytest.approx(
+        0.9118100571001598, abs=1e-9
+    )
+    assert res["missing"] == ["d903"]
+    assert res["coverage"] == pytest.approx(2 / 3)
+    assert (res["n_scored"], res["n_total"], res["full_coverage"]) == (2, 3, False)
+    assert (res["n_datasets_scored"], res["n_datasets_total"]) == (1, 2)
+    assert res["invalid"] == [] and res["incomplete"] == []
+
+
+def test_score_all_scopes_submission_to_selected_modality(tmp_path):
+    task, labels, ids, emb = _classification()
+    _write_csv(tmp_path / "sub.csv", {"d901": (ids, emb)})
+    tasks = [task, _task("t903", "d903", "regression", "pearson")]
+    datasets = [
+        {"id": "d901", "modality": "bulk RNA"},
+        {"id": "d903", "modality": "Single Cell RNA"},
+    ]
+    result = ev.score_all(
+        tmp_path / "sub.csv",
+        modality="bulk-rna",
+        datasets=datasets,
+        tasks=tasks,
+        fetch_labels=lambda task_id: labels,
+    )
+    assert result["n_datasets_total"] == 1
+    assert result["full_coverage"] is True
+    with pytest.raises(SubmissionError, match="outside the selected modality"):
+        ev.score_all(
+            tmp_path / "sub.csv",
+            modality="single-cell-rna",
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=_no_fetch,
+        )
+
+
+def test_unknown_modality_is_the_submitters_error(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    with pytest.raises(SubmissionError, match="unknown or unavailable modality"):
+        ev.score_all(
+            path,
+            modality="proteomics",
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )
+
+
+def test_score_all_null_is_chance(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path, signal=False)
+    res = ev.score_all(path, datasets=datasets, tasks=tasks, fetch_labels=fetch)
+    assert res["categories"]["treatment_outcome"]["mean"] < 0.7
+
+
+def test_multi_task_per_dataset(tmp_path):
+    _, cl, cids, cemb = _classification(signal=True)
+    yreg = np.random.default_rng(3).normal(size=len(cids))
+    rl = _labels(yreg, _folds(len(cids)), cids)
+    _write_csv(tmp_path / "s.csv", {"d901": (cids, cemb)})
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t902", "d901", "regression", "pearson"),
+    ]
+    labels_by = {"t901": cl, "t902": rl}
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels=labels_by.__getitem__,
+    )
+    assert res["n_total"] == 2 and res["n_scored"] == 2
+    assert res["full_coverage"] is True
+    assert res["n_datasets_total"] == 1 and res["n_datasets_scored"] == 1
+    assert set(res["categories"]) == {"treatment_outcome", "clinical_scores"}
+    assert res["incomplete"] == []
+
+
+def test_missing_dataset_makes_all_its_tasks_missing(tmp_path):
+    _, cl, cids, cemb = _classification()
+    _write_csv(tmp_path / "s.csv", {"d901": (cids, cemb)})
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t902", "d902", "regression", "pearson"),
+    ]
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}, {"id": "d902"}],
+        tasks=tasks,
+        fetch_labels={"t901": cl}.__getitem__,
+    )
+    assert res["missing"] == ["d902"]
+    assert res["full_coverage"] is False
+    assert res["n_scored"] == 1 and res["n_total"] == 2
+    assert res["n_datasets_scored"] == 1
+    assert res["incomplete"] == []
+
+
+def test_invalid_task_when_dataset_embedded(tmp_path):
+    _, cl, cids, cemb = _classification(n=60)
+    _write_csv(tmp_path / "s.csv", {"d901": (cids, cemb)})
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t902", "d901", "classification", "auroc"),
+    ]
+    bad = _labels(
+        np.array([0, 1, 0, 1]), np.array([0, 1, 2, 3]), ids=["z0", "z1", "z2", "z3"]
+    )
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels={"t901": cl, "t902": bad}.__getitem__,
+    )
+    assert res["n_scored"] == 1 and res["full_coverage"] is False
+    invalid = res["invalid"][0]
+    assert invalid["task_id"] == "t902" and invalid["dataset_id"] == "d901"
+    assert res["incomplete"] == ["d901"]
+    assert res["n_datasets_scored"] == 0
+
+
+def test_block_invalid_fails_all_its_tasks(tmp_path):
+    df = pd.DataFrame(
+        {
+            DATASET_ID: ["d901", "d901"],
+            SAMPLE_ID: ["a", "a"],
+            "e0": [1.0, 2.0],
+            "e1": [3.0, 4.0],
+        }
+    )
+    df.to_csv(tmp_path / "s.csv", index=False)
+    tasks = [
+        _task("t901", "d901", "classification", "auroc"),
+        _task("t902", "d901", "regression", "pearson"),
+    ]
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels=_no_fetch,
+    )
+    assert res["n_scored"] == 0
+    reasons = {i["task_id"]: i["reason"] for i in res["invalid"]}
+    assert set(reasons) == {"t901", "t902"}
+    assert "duplicate" in reasons["t901"] and reasons["t901"] == reasons["t902"]
+    assert res["incomplete"] == ["d901"]
+
+
+def test_score_all_unknown_dataset_raises(tmp_path):
+    _, _, cids, cemb = _classification()
+    _write_csv(
+        tmp_path / "s.csv", {"d901": (cids, cemb), "d999": (["a"], np.ones((1, 8)))}
+    )
+    tasks = [_task("t901", "d901", "classification", "auroc")]
+    with pytest.raises(SubmissionError, match="unknown"):
+        ev.score_all(
+            tmp_path / "s.csv",
+            datasets=[{"id": "d901"}],
+            tasks=tasks,
+            fetch_labels=_no_fetch,
+        )
+
+
+def test_incomplete_dataset_is_invalid(tmp_path):
+    _, cl, cids, cemb = _classification(n=60)
+    _write_csv(tmp_path / "s.csv", {"d901": (cids[:-5], cemb[:-5])})
+    tasks = [_task("t901", "d901", "classification", "auroc")]
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels=lambda task_id: cl,
+    )
+    assert res["n_scored"] == 0
+    assert res["invalid"][0]["task_id"] == "t901"
+    assert "missing" in res["invalid"][0]["reason"]
+    assert res["incomplete"] == ["d901"]
+
+
+def test_scoring_error_is_invalid(tmp_path):
+    n = 20
+    folds = np.repeat(np.arange(5), 4)
+    y = np.tile([0, 1], n // 2)
+    ids = [f"s{i}" for i in range(n)]
+    emb = np.random.default_rng(0).normal(size=(n, 6))
+    emb[3, 2] = np.nan
+    labels = _labels(y, folds, ids)
+    _write_csv(tmp_path / "s.csv", {"d901": (ids, emb)})
+    tasks = [_task("t901", "d901", "classification", "auroc")]
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels=lambda task_id: labels,
+    )
+    assert res["n_scored"] == 0
+    assert "NaN or inf" in res["invalid"][0]["reason"]
+
+
+def test_a_degenerate_transfer_score_is_invalid(tmp_path):
+    """Constant predictions give a NaN Pearson: the task is invalid, not scored."""
+    y = np.random.default_rng(10).normal(size=20)
+    labels = _transfer_labels(y, [ev.SPLIT_TRAIN] * 14 + [ev.SPLIT_TEST] * 6)
+    ids = list(labels[SAMPLE_ID])
+    _write_csv(tmp_path / "s.csv", {"d902": (ids, np.ones((20, 3)))})
+    res = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d902"}],
+        tasks=[_task("t902", "d902", "regression", "pearson")],
+        fetch_labels=lambda task_id: labels,
+        representation=ev.GENE_SPACE,
+    )
+    assert res["n_scored"] == 0
+    assert res["invalid"][0]["reason"] == "degenerate score (constant predictions)"
+
+
+def test_a_broken_fold_stops_the_scoring(tmp_path):
+    """Our error is raised, never recorded as the submitter's invalid task."""
+    y = np.array([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1])
+    labels = _labels(y, np.repeat([0, 1, 2], 4))
+    ids = list(labels[SAMPLE_ID])
+    _write_csv(
+        tmp_path / "s.csv",
+        {"d901": (ids, np.random.default_rng(8).normal(size=(12, 3)))},
+    )
+    with pytest.raises(EvaluatorError, match="single label value"):
+        ev.score_all(
+            tmp_path / "s.csv",
+            datasets=[{"id": "d901"}],
+            tasks=[_task("t901", "d901", "classification", "auroc")],
+            fetch_labels=lambda task_id: labels,
+        )
+
+
+def test_fetch_failure_raises_evaluator_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(ev, "FETCH_BACKOFF", 0.0)
+    _, _, cids, cemb = _classification()
+    _write_csv(tmp_path / "s.csv", {"d901": (cids, cemb)})
+    tasks = [_task("t901", "d901", "classification", "auroc")]
+    calls = []
+
+    def boom(task_id):
+        calls.append(task_id)
+        raise ConnectionError("hub unreachable")
+
+    with pytest.raises(EvaluatorError, match="could not load"):
+        ev.score_all(
+            tmp_path / "s.csv",
+            datasets=[{"id": "d901"}],
+            tasks=tasks,
+            fetch_labels=boom,
+        )
+    assert calls == ["t901"] * ev.FETCH_ATTEMPTS
+
+
+def test_a_flaky_fetch_is_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(ev, "FETCH_BACKOFF", 0.0)
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    failures = {"t901": 2}
+
+    def flaky(task_id):
+        if failures.get(task_id, 0):
+            failures[task_id] -= 1
+            raise ConnectionError("hub hiccup")
+        return fetch(task_id)
+
+    res = ev.score_all(path, datasets=datasets, tasks=tasks, fetch_labels=flaky)
+    assert res["full_coverage"] is True
+
+
+def test_score_all_transfer_two_tasks(tmp_path):
+    _, forward, ids, emb = _transfer_classification(signal=True)
+    y = forward[ev.LABEL].to_numpy()
+    reverse_split = np.where(
+        forward[ev.SPLIT].to_numpy() == ev.SPLIT_TRAIN, ev.SPLIT_TEST, ev.SPLIT_TRAIN
+    )
+    backward = _transfer_labels(y, reverse_split, ids)
+    _write_csv(tmp_path / "sub.csv", {"d904": (ids, emb)})
+    tasks = [
+        _task("t904", "d904", "classification", "auroc"),
+        _task("t905", "d904", "classification", "auroc"),
+    ]
+    res = ev.score_all(
+        tmp_path / "sub.csv",
+        datasets=[{"id": "d904"}],
+        tasks=tasks,
+        fetch_labels={"t904": forward, "t905": backward}.__getitem__,
+    )
+    assert res["n_total"] == 2 and res["n_scored"] == 2
+    assert res["full_coverage"] is True
+    assert res["n_datasets_total"] == 1 and res["n_datasets_scored"] == 1
+    assert set(res["categories"]) == {"treatment_outcome"}
+
+
+def test_embedding_submission_is_read_on_the_unit_sphere(tmp_path):
+    """Rescaling one patient's vector must not move an embedding score."""
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path, signal=True)
+    frame = pd.read_csv(path)
+    dims = [c for c in frame.columns if c not in {DATASET_ID, SAMPLE_ID}]
+    frame.loc[::2, dims] = frame.loc[::2, dims] * 7.0
+    frame.to_csv(tmp_path / "scaled.csv", index=False)
+
+    plain = ev.score_all(path, datasets=datasets, tasks=tasks, fetch_labels=fetch)
+    stretched = ev.score_all(
+        tmp_path / "scaled.csv", datasets=datasets, tasks=tasks, fetch_labels=fetch
+    )
+
+    assert [round(t.score, 10) for t in plain["per_task"]] == [
+        round(t.score, 10) for t in stretched["per_task"]
+    ]
+
+
+def test_gene_space_submission_keeps_its_own_scale(tmp_path):
+    """The same rescaling does move a gene-space score: that scale is a measurement."""
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path, signal=True)
+    frame = pd.read_csv(path)
+    dims = [c for c in frame.columns if c not in {DATASET_ID, SAMPLE_ID}]
+    frame.loc[::2, dims] = frame.loc[::2, dims] * 7.0
+    frame.to_csv(tmp_path / "scaled.csv", index=False)
+
+    kwargs = {"datasets": datasets, "tasks": tasks, "fetch_labels": fetch}
+    as_genes = ev.score_all(
+        tmp_path / "scaled.csv", representation=ev.GENE_SPACE, **kwargs
+    )
+    as_embedding = ev.score_all(
+        tmp_path / "scaled.csv", representation=ev.EMBEDDING, **kwargs
+    )
+
+    assert [t.score for t in as_genes["per_task"]] != [
+        t.score for t in as_embedding["per_task"]
+    ]
+
+
+def test_unknown_representation_is_the_submitters_error(tmp_path):
+    path, datasets, tasks, fetch = _two_task_submission(tmp_path)
+    with pytest.raises(SubmissionError, match="unknown representation"):
+        ev.score_all(
+            path,
+            representation="whatever",
+            datasets=datasets,
+            tasks=tasks,
+            fetch_labels=fetch,
+        )
