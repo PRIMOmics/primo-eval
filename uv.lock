@@ -216,6 +216,7 @@ name = "primomics"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
+    { name = "joblib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -230,6 +231,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "joblib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },

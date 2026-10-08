@@ -5,6 +5,7 @@ Spearman for perturbation responses.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
@@ -99,3 +100,17 @@ METRICS: dict[str, Callable[[np.ndarray, np.ndarray, np.ndarray | None], float]]
     "auroc": compute_auroc,
     "pearson": compute_pearson,
 }
+
+
+@dataclass(frozen=True)
+class TaskScore:
+    """One task's result: a raw metric plus the category it is grouped under."""
+
+    task_id: str
+    dataset_id: str
+    category: str
+    metric: str
+    score: float
+    n_samples: int
+    repeat_scores: tuple[float, ...] = ()
+    diagnostics: dict[str, float] = field(default_factory=dict)
