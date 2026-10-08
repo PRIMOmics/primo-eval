@@ -1,8 +1,9 @@
 """Score a submission: each task with the probe, then per-family means and coverage.
 
-A task is scored over its frozen CV folds, or over a fixed transfer split. The
-caller passes the datasets, the tasks and a function that returns a task's
-labels, so this module never knows where the labels are stored.
+A task is scored over its frozen CV folds, or over a fixed transfer split. A
+perturbation task decodes a hidden response matrix instead of one label. The
+caller passes the datasets, the tasks and functions that return a task's labels
+and responses, so this module never knows where they are stored.
 """
 
 import logging
@@ -15,10 +16,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from joblib import Parallel, cpu_count, delayed, parallel_backend
+from sklearn.preprocessing import StandardScaler
 
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.metrics import METRICS, TaskScore, category_means
-from primomics.probe import INNER_CV_JOBS, LOGREG_TOL, fit_predict
+from primomics.metrics import (
+    METRICS,
+    TaskScore,
+    category_means,
+    compute_residual_sample_spearman,
+    compute_target_centered_sample_spearman,
+)
+from primomics.probe import INNER_CV_JOBS, LOGREG_TOL, fit_predict, ridge_predict
 from primomics.submission import (
     DATASET_ID,
     SAMPLE_ID,
@@ -36,6 +44,12 @@ FOLD_PREFIX = f"{FOLD}_"
 SPLIT = "split"
 SPLIT_TRAIN = "train"
 SPLIT_TEST = "test"
+PAIR_ID = "pair_id"
+PAIRING = "pairing"
+PAIRED = "paired"
+PERTURBATION = "perturbation"
+RESIDUAL_SPEARMAN = "residual_spearman"
+CENTERED_SPEARMAN = "centered_spearman"
 MODALITIES = {"bulk-rna": "bulk RNA", "single-cell-rna": "Single Cell RNA"}
 
 EMBEDDING = "embedding"
@@ -43,6 +57,8 @@ GENE_SPACE = "gene_space"
 REPRESENTATIONS = (EMBEDDING, GENE_SPACE)
 
 OUTER_CV_JOBS = min(10, cpu_count())
+OUTER_PARALLEL_MIN_SAMPLES = 30
+PERTURBATION_TEST_Z_CLIP = 20.0
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF = 1.0
 
@@ -58,6 +74,14 @@ class TaskOutcome:
     status: str
     score: TaskScore | None = None
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class PerturbationTargets:
+    """Hidden response vectors and their aligned gene identifiers."""
+
+    delta: np.ndarray
+    gene_ids: np.ndarray
 
 
 def _fold_columns(labels: pd.DataFrame) -> list[str]:
@@ -78,7 +102,13 @@ def _fold_columns(labels: pd.DataFrame) -> list[str]:
 def load_labels(path: str | Path) -> pd.DataFrame:
     """Read a task's labels with repeated CV folds or one transfer split."""
     df = pd.read_csv(path)
-    missing = {SAMPLE_ID, SUBJECT_ID, LABEL} - set(df.columns)
+    is_perturbation = PAIR_ID in df.columns
+    required = (
+        {SAMPLE_ID, SUBJECT_ID, PAIR_ID}
+        if is_perturbation
+        else {SAMPLE_ID, SUBJECT_ID, LABEL}
+    )
+    missing = required - set(df.columns)
     if missing:
         raise EvaluatorError(f"labels.csv missing columns: {sorted(missing)}")
     _subject_groups(df)
@@ -90,6 +120,23 @@ def load_labels(path: str | Path) -> pd.DataFrame:
             "transfer split."
         )
     return df
+
+
+def load_targets(path: str | Path) -> PerturbationTargets:
+    """Read and validate one task's hidden perturbation responses."""
+    with np.load(path, allow_pickle=False) as data:
+        missing = {"delta", "gene_ids"} - set(data.files)
+        if missing:
+            raise EvaluatorError(f"targets.npz missing arrays: {sorted(missing)}")
+        delta = np.asarray(data["delta"], dtype=float)
+        gene_ids = np.asarray(data["gene_ids"]).astype(str)
+    if delta.ndim != 2:
+        raise EvaluatorError(f"targets delta must be 2D, got shape {delta.shape}")
+    if gene_ids.ndim != 1 or len(gene_ids) != delta.shape[1]:
+        raise EvaluatorError("targets gene_ids must align with delta columns")
+    if not np.isfinite(delta).all():
+        raise EvaluatorError("targets delta contains NaN or inf values")
+    return PerturbationTargets(delta=delta, gene_ids=gene_ids)
 
 
 def _subject_groups(labels: pd.DataFrame) -> np.ndarray:
@@ -255,9 +302,188 @@ def _transfer_predict(
     return y[test], preds
 
 
-def score_task(task: dict, labels: pd.DataFrame, emb: pd.DataFrame) -> TaskScore:
+def _select_degs(delta_train: np.ndarray, n_top: int) -> np.ndarray:
+    """Select the strongest mean absolute responses using training rows only."""
+    n_keep = min(int(n_top), delta_train.shape[1])
+    if n_keep <= 0:
+        raise EvaluatorError("perturbation task has no response genes to select")
+    effect = np.abs(np.mean(delta_train, axis=0))
+    return np.argsort(effect, kind="stable")[-n_keep:]
+
+
+def _mean_scores(scores: list[float]) -> float:
+    """Average finite fold scores."""
+    finite = np.asarray(scores)[np.isfinite(scores)]
+    return float(np.mean(finite)) if len(finite) else float("nan")
+
+
+def _perturbation_fold(
+    matrix: np.ndarray,
+    delta: np.ndarray,
+    groups: np.ndarray,
+    train: np.ndarray,
+    test: np.ndarray,
+    n_top: int,
+    target_centered: bool,
+) -> float:
+    """Fit and score one leakage-safe perturbation fold."""
+    if not train.any() or not test.any():
+        raise EvaluatorError("perturbation fold has an empty train or test side")
+    genes = _select_degs(delta[train], n_top)
+    y_train = delta[train][:, genes]
+    y_test = delta[test][:, genes]
+    scaler = StandardScaler().fit(matrix[train])
+    x_train = scaler.transform(matrix[train])
+    x_test = np.clip(
+        scaler.transform(matrix[test]),
+        -PERTURBATION_TEST_Z_CLIP,
+        PERTURBATION_TEST_Z_CLIP,
+    )
+    predictions = ridge_predict(x_train, y_train, x_test, groups[train])
+    if target_centered:
+        correlation = compute_target_centered_sample_spearman(y_test, predictions)
+    else:
+        training_mean = np.mean(y_train, axis=0)
+        correlation = compute_residual_sample_spearman(
+            y_test, predictions, training_mean
+        )
+    if not np.isfinite(correlation):
+        raise SubmissionError("a perturbation fold has a degenerate Spearman score")
+    return float(np.clip(correlation, -1.0, 1.0))
+
+
+def _perturbation_repeat(
+    matrix: np.ndarray,
+    delta: np.ndarray,
+    groups: np.ndarray,
+    partitions: list[tuple[np.ndarray, np.ndarray]],
+    n_top: int,
+) -> float:
+    """Score every fold in one perturbation repeat."""
+    return _mean_scores(
+        [
+            _perturbation_fold(matrix, delta, groups, train, test, n_top, False)
+            for train, test in partitions
+        ]
+    )
+
+
+def _parallel_perturbation_repeats(
+    matrix: np.ndarray,
+    delta: np.ndarray,
+    groups: np.ndarray,
+    repeats: list[list[tuple[np.ndarray, np.ndarray]]],
+    n_top: int,
+) -> tuple[float, ...]:
+    """Score independent perturbation repeats across available workers."""
+    workers = (
+        min(OUTER_CV_JOBS, len(repeats))
+        if len(matrix) >= OUTER_PARALLEL_MIN_SAMPLES
+        else 1
+    )
+    if workers == 1:
+        scores = [
+            _perturbation_repeat(matrix, delta, groups, folds, n_top)
+            for folds in repeats
+        ]
+    else:
+        with parallel_backend("loky", inner_max_num_threads=1):
+            scores = Parallel(n_jobs=workers)(
+                delayed(_perturbation_repeat)(matrix, delta, groups, folds, n_top)
+                for folds in repeats
+            )
+    return tuple(float(score) for score in scores)
+
+
+def _paired_perturbation_scores(
+    matrix: np.ndarray,
+    delta: np.ndarray,
+    labels: pd.DataFrame,
+    n_top: int,
+) -> tuple[float, ...]:
+    """Score each frozen subject-grouped CV partition the labels carry."""
+    groups = _subject_groups(labels)
+    repeats = []
+    for column in _fold_columns(labels):
+        folds = labels[column].to_numpy()
+        repeats.append(
+            [(folds != fold, folds == fold) for fold in sorted(np.unique(folds))]
+        )
+    return _parallel_perturbation_repeats(matrix, delta, groups, repeats, n_top)
+
+
+def _transfer_perturbation_scores(
+    matrix: np.ndarray,
+    delta: np.ndarray,
+    labels: pd.DataFrame,
+    n_top: int,
+    target_centered: bool,
+) -> tuple[tuple[float, ...], int]:
+    """Train every response-decoding component on the source disease only."""
+    groups = _subject_groups(labels)
+    split = labels[SPLIT].astype(str).to_numpy()
+    train, test = split == SPLIT_TRAIN, split == SPLIT_TEST
+    metrics = _perturbation_fold(
+        matrix, delta, groups, train, test, n_top, target_centered
+    )
+    return (metrics,), int(test.sum())
+
+
+def _score_perturbation_task(
+    task: dict,
+    labels: pd.DataFrame,
+    emb: pd.DataFrame,
+    targets: PerturbationTargets,
+) -> TaskScore:
+    """Decode one hidden response matrix from submitted baseline embeddings."""
+    if len(labels) != len(targets.delta):
+        raise EvaluatorError("labels.csv and targets.npz have different row counts")
+    matrix = _align(labels, emb)
+    n_top = int(task.get("n_top_de_genes", 0))
+    pairing = str(task.get(PAIRING, labels.get(PAIRING, pd.Series([PAIRED])).iloc[0]))
+    if SPLIT in labels:
+        repeat_scores, n_samples = _transfer_perturbation_scores(
+            matrix,
+            targets.delta,
+            labels,
+            n_top,
+            bool(task.get("target_centered", False)),
+        )
+    elif pairing == PAIRED:
+        repeat_scores = _paired_perturbation_scores(
+            matrix, targets.delta, labels, n_top
+        )
+        n_samples = len(labels)
+    else:
+        raise EvaluatorError(f"unsupported perturbation pairing: {pairing}")
+    return TaskScore(
+        task_id=norm_id(task[TASK_ID]),
+        dataset_id=norm_id(task[DATASET_ID]),
+        category=str(task["category"]),
+        metric=str(task.get("metric", RESIDUAL_SPEARMAN)),
+        score=float(np.mean(repeat_scores)),
+        n_samples=n_samples,
+        repeat_scores=repeat_scores,
+    )
+
+
+def score_task(
+    task: dict,
+    labels: pd.DataFrame,
+    emb: pd.DataFrame,
+    targets: PerturbationTargets | None = None,
+) -> TaskScore:
     """Score one task: repeated fold-wise CV, or a fixed transfer split."""
     metric = task["metric"]
+    if task.get("task_type") == PERTURBATION:
+        if metric not in {CENTERED_SPEARMAN, RESIDUAL_SPEARMAN}:
+            raise EvaluatorError(
+                f"perturbation task {task.get(TASK_ID)} needs metric "
+                f"'{CENTERED_SPEARMAN}'"
+            )
+        if targets is None:
+            raise EvaluatorError("perturbation task is missing targets.npz")
+        return _score_perturbation_task(task, labels, emb, targets)
     if metric not in METRICS:
         raise EvaluatorError(f"unknown metric '{metric}' for task {task.get(TASK_ID)}")
     task_type = task["task_type"]
@@ -346,6 +572,7 @@ def _task_outcome(
     emb: pd.DataFrame | None,
     block_error: str | None,
     fetch_labels: Callable[[str], pd.DataFrame],
+    fetch_targets: Callable[[str], PerturbationTargets] | None,
 ) -> TaskOutcome:
     """Score one task, mapping each failure to the right category."""
     task_id = norm_id(task[TASK_ID])
@@ -360,8 +587,18 @@ def _task_outcome(
         raise EvaluatorError(
             f"could not load evaluation data for a task: {error}"
         ) from error
+    targets = None
+    if task.get("task_type") == PERTURBATION:
+        if fetch_targets is None:
+            raise EvaluatorError("a perturbation task needs fetch_targets")
+        try:
+            targets = _retry(lambda: fetch_targets(task_id))
+        except Exception as error:
+            raise EvaluatorError(
+                f"could not load perturbation targets for a task: {error}"
+            ) from error
     try:
-        score = score_task(task, labels, emb)
+        score = score_task(task, labels, emb, targets)
     except SubmissionError as error:
         return TaskOutcome(task_id, dataset_id, "invalid", reason=str(error))
     if not np.isfinite(score.score):
@@ -380,6 +617,7 @@ def score_all(
     datasets: list[dict],
     tasks: list[dict],
     fetch_labels: Callable[[str], pd.DataFrame],
+    fetch_targets: Callable[[str], PerturbationTargets] | None = None,
     modality: str | None = None,
     representation: str = EMBEDDING,
 ) -> dict:
@@ -430,6 +668,7 @@ def score_all(
             emb_by_ds.get(norm_id(task[DATASET_ID])),
             block_error.get(norm_id(task[DATASET_ID])),
             fetch_labels,
+            fetch_targets,
         )
         for task in scoreable_tasks(tasks, all_ids)
         if norm_id(task[DATASET_ID]) in valid

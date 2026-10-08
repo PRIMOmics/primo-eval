@@ -785,3 +785,286 @@ def test_unknown_representation_is_the_submitters_error(tmp_path):
             tasks=tasks,
             fetch_labels=fetch,
         )
+
+
+def _perturbation_task(task_id="t906", dataset_id="d906", target_centered=False):
+    return {
+        "task_id": task_id,
+        "dataset_id": dataset_id,
+        "task_type": ev.PERTURBATION,
+        "metric": ev.CENTERED_SPEARMAN,
+        "category": "perturbation_prediction",
+        "pairing": ev.PAIRED,
+        "n_top_de_genes": 4,
+        "target_centered": target_centered,
+    }
+
+
+def _perturbation_labels(ids, folds):
+    return pd.DataFrame(
+        {
+            SAMPLE_ID: ids,
+            ev.SUBJECT_ID: [f"p{i}" for i in range(len(ids))],
+            ev.PAIR_ID: [f"pair{i}" for i in range(len(ids))],
+            ev.PAIRING: ev.PAIRED,
+            ev.FOLD: folds,
+            f"{ev.FOLD}_1": np.roll(folds, 1),
+            f"{ev.FOLD}_2": np.roll(folds, 2),
+        }
+    )
+
+
+def _genes(n):
+    return np.array([f"g{i}" for i in range(n)])
+
+
+def test_perturbation_constant_embedding_anchors_at_zero():
+    rng = np.random.default_rng(12)
+    n = 30
+    ids = [f"s{i}" for i in range(n)]
+    labels = _perturbation_labels(ids, _folds(n, 3))
+    targets = ev.PerturbationTargets(delta=rng.normal(size=(n, 8)), gene_ids=_genes(8))
+    result = ev.score_task(
+        _perturbation_task(), labels, _emb_frame(np.ones((n, 3)), ids), targets
+    )
+    assert result.score == pytest.approx(0.0, abs=1e-12)
+    assert len(result.repeat_scores) == 3
+
+
+def test_perturbation_signal_decodes_hidden_response():
+    rng = np.random.default_rng(4)
+    n = 45
+    ids = [f"s{i}" for i in range(n)]
+    emb = rng.normal(size=(n, 5))
+    delta = emb @ rng.normal(size=(5, 8)) + rng.normal(scale=0.01, size=(n, 8))
+    labels = _perturbation_labels(ids, _folds(n, 3))
+    targets = ev.PerturbationTargets(delta, _genes(8))
+    result = ev.score_task(_perturbation_task(), labels, _emb_frame(emb, ids), targets)
+    assert result.score > 0.9
+
+
+def _fixed_perturbation(kind):
+    """36 patients, a 5-dim embedding and 40 genes, all built from formulas."""
+    rows = np.arange(36)
+    emb = np.sin(np.outer(rows + 1, np.arange(1, 6)) * 0.7)
+    weights = np.cos(np.outer(np.arange(1, 6), np.arange(1, 41)) * 0.3)
+    delta = emb @ weights + 0.5 * np.sin(np.outer(rows + 2, np.arange(1, 41)) * 1.7)
+    ids = [f"s{i:02d}" for i in rows]
+    labels = pd.DataFrame(
+        {
+            SAMPLE_ID: ids,
+            ev.SUBJECT_ID: [f"p{i:02d}" for i in rows],
+            ev.PAIR_ID: [f"pair{i:02d}" for i in rows],
+            ev.PAIRING: ev.PAIRED,
+        }
+    )
+    if kind == "cv":
+        for repeat in range(10):
+            rank = np.argsort(np.argsort(np.sin((repeat + 1.3) * rows)))
+            labels[ev.FOLD if repeat == 0 else f"{ev.FOLD}_{repeat}"] = rank % 3
+    else:
+        labels[ev.SPLIT] = np.where(rows < 24, ev.SPLIT_TRAIN, ev.SPLIT_TEST)
+    task = {
+        **_perturbation_task(target_centered=kind == "transfer-centered"),
+        "n_top_de_genes": 10,
+    }
+    targets = ev.PerturbationTargets(delta, _genes(40))
+    return task, labels, _emb_frame(emb, ids), targets
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected", "n_repeats", "n_samples"),
+    [
+        ("cv", 0.7657239057239057, 10, 36),
+        ("transfer", 0.7747474747474747, 1, 12),
+        ("transfer-centered", 0.8262626262626261, 1, 12),
+    ],
+)
+def test_perturbation_matches_the_live_evaluator(kind, expected, n_repeats, n_samples):
+    """Scores the live evaluator gives on this task: a changed decoder moves them."""
+    task, labels, emb, targets = _fixed_perturbation(kind)
+
+    result = ev.score_task(task, labels, emb, targets)
+
+    assert result.score == pytest.approx(expected, abs=1e-9)
+    assert len(result.repeat_scores) == n_repeats
+    assert result.n_samples == n_samples
+
+
+def test_perturbation_decoder_clips_test_coordinates(monkeypatch):
+    seen = {}
+
+    def ridge_predict(x_train, y_train, x_test, groups_train):
+        seen["maximum"] = float(np.max(np.abs(x_test)))
+        return np.tile(y_train.mean(axis=0), (len(x_test), 1))
+
+    monkeypatch.setattr(ev, "ridge_predict", ridge_predict)
+    matrix = np.array([[0.0], [1.0], [1_000_000.0]])
+    delta = np.array([[1.0, 2.0], [2.0, 1.0], [3.0, 4.0]])
+    score = ev._perturbation_fold(
+        matrix,
+        delta,
+        np.array(["p1", "p2", "p3"]),
+        np.array([True, True, False]),
+        np.array([False, False, True]),
+        2,
+        False,
+    )
+
+    assert seen["maximum"] == ev.PERTURBATION_TEST_Z_CLIP
+    assert score == pytest.approx(0.0)
+
+
+def test_deg_selection_uses_only_the_supplied_training_rows():
+    delta = np.array(
+        [
+            [8.0, 0.0],
+            [8.0, 0.0],
+            [0.0, 100.0],
+            [0.0, 100.0],
+        ]
+    )
+    source = np.array([True, True, False, False])
+    assert ev._select_degs(delta[source], 1).tolist() == [0]
+    assert ev._select_degs(delta[~source], 1).tolist() == [1]
+
+
+def test_directional_transfer_never_fits_on_target_disease(monkeypatch):
+    matrix = np.arange(24, dtype=float).reshape(6, 4)
+    delta = np.arange(18, dtype=float).reshape(6, 3)
+    labels = pd.DataFrame(
+        {
+            ev.SUBJECT_ID: [f"p{i}" for i in range(6)],
+            ev.SPLIT: [ev.SPLIT_TRAIN] * 4 + [ev.SPLIT_TEST] * 2,
+        }
+    )
+    seen = {}
+
+    def fold(matrix_arg, delta_arg, groups_arg, train, test, n_top, target_centered):
+        assert groups_arg.tolist() == [f"p{i}" for i in range(6)]
+        seen["train"] = np.flatnonzero(train).tolist()
+        seen["test"] = np.flatnonzero(test).tolist()
+        seen["n_top"] = n_top
+        seen["target_centered"] = target_centered
+        return 0.75
+
+    monkeypatch.setattr(ev, "_perturbation_fold", fold)
+    metrics, n_test = ev._transfer_perturbation_scores(matrix, delta, labels, 2, True)
+    assert seen == {
+        "train": [0, 1, 2, 3],
+        "test": [4, 5],
+        "n_top": 2,
+        "target_centered": True,
+    }
+    assert metrics == (0.75,)
+    assert n_test == 2
+
+
+def test_repeated_sample_ids_reuse_one_baseline_embedding():
+    labels = pd.DataFrame({SAMPLE_ID: ["s1", "s1", "s2", "s1"]})
+    embeddings = _emb_frame(np.array([[1.0, 2.0], [3.0, 4.0]]), ["s1", "s2"])
+    aligned = ev._align(labels, embeddings)
+    np.testing.assert_array_equal(
+        aligned,
+        np.array([[1.0, 2.0], [1.0, 2.0], [3.0, 4.0], [1.0, 2.0]]),
+    )
+
+
+def test_load_perturbation_labels_and_targets(tmp_path):
+    labels = pd.DataFrame(
+        {
+            SAMPLE_ID: ["s1", "s2"],
+            ev.SUBJECT_ID: ["p1", "p2"],
+            ev.PAIR_ID: ["pair1", "pair2"],
+            ev.PAIRING: [ev.PAIRED, ev.PAIRED],
+            ev.FOLD: [0, 1],
+        }
+    )
+    labels.to_csv(tmp_path / "labels.csv", index=False)
+    np.savez_compressed(
+        tmp_path / "targets.npz", delta=np.ones((2, 3)), gene_ids=_genes(3)
+    )
+    loaded_labels = ev.load_labels(tmp_path / "labels.csv")
+    loaded_targets = ev.load_targets(tmp_path / "targets.npz")
+    assert ev.LABEL not in loaded_labels
+    assert loaded_targets.delta.shape == (2, 3)
+
+
+@pytest.mark.parametrize(
+    ("arrays", "message"),
+    [
+        ({"delta": np.ones((2, 3))}, "missing arrays"),
+        ({"delta": np.ones(3), "gene_ids": _genes(3)}, "2D"),
+        ({"delta": np.ones((2, 3)), "gene_ids": _genes(2)}, "align"),
+        ({"delta": np.full((2, 3), np.nan), "gene_ids": _genes(3)}, "NaN"),
+    ],
+)
+def test_bad_targets_are_our_error(tmp_path, arrays, message):
+    np.savez(tmp_path / "targets.npz", **arrays)
+    with pytest.raises(EvaluatorError, match=message):
+        ev.load_targets(tmp_path / "targets.npz")
+
+
+def test_targets_with_another_row_count_are_our_error():
+    ids = [f"s{i}" for i in range(6)]
+    labels = _perturbation_labels(ids, _folds(6, 3))
+    targets = ev.PerturbationTargets(np.ones((5, 3)), _genes(3))
+    with pytest.raises(EvaluatorError, match="different row counts"):
+        ev.score_task(_perturbation_task(), labels, _emb_frame(np.eye(6), ids), targets)
+
+
+def test_an_unsupported_pairing_is_our_error():
+    ids = [f"s{i}" for i in range(6)]
+    labels = _perturbation_labels(ids, _folds(6, 3))
+    task = {**_perturbation_task(), "pairing": "cartesian"}
+    targets = ev.PerturbationTargets(np.ones((6, 3)), _genes(3))
+    with pytest.raises(EvaluatorError, match="unsupported perturbation pairing"):
+        ev.score_task(task, labels, _emb_frame(np.eye(6), ids), targets)
+
+
+def test_a_perturbation_task_needs_a_spearman_metric():
+    task = {**_perturbation_task(), "metric": "pearson"}
+    with pytest.raises(EvaluatorError, match="needs metric"):
+        ev.score_task(task, pd.DataFrame(), pd.DataFrame(), None)
+
+
+def test_score_all_fetches_hidden_targets_only_for_perturbation(tmp_path):
+    rng = np.random.default_rng(31)
+    n = 30
+    ids = [f"s{i}" for i in range(n)]
+    emb = rng.normal(size=(n, 4))
+    targets = ev.PerturbationTargets(emb @ rng.normal(size=(4, 6)), _genes(6))
+    labels = _perturbation_labels(ids, _folds(n, 3))
+    _, cl, cids, cemb = _classification()
+    _write_csv(tmp_path / "submission.csv", {"d906": (ids, emb), "d901": (cids, cemb)})
+    asked = []
+
+    def fetch_targets(task_id):
+        asked.append(task_id)
+        return targets
+
+    result = ev.score_all(
+        tmp_path / "submission.csv",
+        datasets=[{"id": "d906"}, {"id": "d901"}],
+        tasks=[_perturbation_task(), _task("t901", "d901", "classification", "auroc")],
+        fetch_labels={"t906": labels, "t901": cl}.__getitem__,
+        fetch_targets=fetch_targets,
+    )
+    assert result["full_coverage"] is True
+    assert asked == ["t906"]
+    assert (
+        result["categories"]["perturbation_prediction"]["metric"]
+        == ev.CENTERED_SPEARMAN
+    )
+
+
+def test_a_perturbation_task_without_fetch_targets_is_our_error(tmp_path):
+    ids = [f"s{i}" for i in range(6)]
+    _write_csv(tmp_path / "submission.csv", {"d906": (ids, np.eye(6))})
+    with pytest.raises(EvaluatorError, match="needs fetch_targets"):
+        ev.score_all(
+            tmp_path / "submission.csv",
+            datasets=[{"id": "d906"}],
+            tasks=[_perturbation_task()],
+            fetch_labels=lambda task_id: _perturbation_labels(ids, _folds(6, 3)),
+        )
