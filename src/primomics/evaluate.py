@@ -327,12 +327,12 @@ def _repeated_cv_scores(
     return tuple(float(score) for score in scores)
 
 
-def _uses_leave_pair_out(metric: str, labels: pd.DataFrame) -> bool:
+def _uses_leave_pair_out(metric: str, labels: pd.DataFrame, groups: np.ndarray) -> bool:
     """Is this a binary AUROC task with fewer than ``MIN_CV_SUBJECTS`` subjects?"""
     return (
         metric == "auroc"
         and labels[LABEL].nunique() == 2
-        and len(np.unique(_subject_groups(labels))) < MIN_CV_SUBJECTS
+        and len(np.unique(groups)) < MIN_CV_SUBJECTS
     )
 
 
@@ -614,7 +614,7 @@ def score_task(
         except ValueError as error:
             raise SubmissionError(f"transfer task not scoreable: {error}") from error
         repeat_scores = (score,)
-    elif _uses_leave_pair_out(metric, labels):
+    elif _uses_leave_pair_out(metric, labels, groups):
         score = _leave_pair_out_score(y, groups, matrix, classes)
         repeat_scores = (score,)
     else:
