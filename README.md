@@ -16,6 +16,8 @@ uv run ruff check
 uv run ruff format --check
 ```
 
+Before you open a pull request, read `CONTRIBUTING.md`.
+
 ## License
 
 Apache-2.0, see `LICENSE`.
