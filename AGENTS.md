@@ -19,6 +19,8 @@ uv run ruff format
 - `src/primomics/metrics.py`: AUROC, Pearson and sample-wise Spearman.
 - `src/primomics/evaluate.py`: scores one task, then a whole submission.
 - `src/primomics/boards.py` and `ranking.py`: the boards and the Elo ranking on each board.
+- `src/primomics/tasks.py` and `public_tasks.yaml`: the specs of the public tasks and
+  their reader.
 - `src/primomics/errors.py`: `SubmissionError` (the submitter fixes it) and
   `EvaluatorError` (we fix it).
 - `tests/`: one test file per module.
