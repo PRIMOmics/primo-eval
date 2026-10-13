@@ -1301,6 +1301,13 @@ def test_the_fold_draw_does_not_decide(monkeypatch):
     assert _protocol(monkeypatch, task, labels) == "cv"
 
 
+def test_paired_binary_tasks_keep_cv(monkeypatch):
+    subjects = np.repeat([f"p{i}" for i in range(10)], 2)
+    labels = _labels(np.tile([0, 1], 10), _folds(20, 3), subjects=subjects)
+    task = _task("t901", "d901", "classification", "auroc")
+    assert _protocol(monkeypatch, task, labels) == "cv"
+
+
 @pytest.mark.parametrize(
     ("task_type", "metric", "y"),
     [
