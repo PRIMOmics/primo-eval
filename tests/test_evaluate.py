@@ -1218,7 +1218,9 @@ def test_an_unreadable_reference_is_our_error(tmp_path):
 def _fixed_probe(scores, seen):
     """A probe that ignores training and returns a fixed score per row."""
 
-    def fit_predict(task_type, x_train, y_train, x_test, classes, groups_train, *_):
+    def fit_predict(
+        task_type, x_train, y_train, x_test, classes, groups_train, inner_cv_jobs
+    ):
         seen.append((x_train[:, 0].astype(int), x_test[:, 0].astype(int), groups_train))
         positive = scores[x_test[:, 0].astype(int)]
         return np.column_stack([1 - positive, positive])

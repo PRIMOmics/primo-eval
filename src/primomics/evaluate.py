@@ -362,7 +362,6 @@ def _pair_ranks(
     matrix: np.ndarray,
     classes: np.ndarray,
     pair: tuple[str, str],
-    inner_cv_jobs: int,
 ) -> tuple[float, int]:
     """Fit without one subject pair, then count its sample pairs ranked right."""
     positive, negative = pair
@@ -374,7 +373,7 @@ def _pair_ranks(
         matrix[held_out],
         classes,
         groups[~held_out],
-        inner_cv_jobs,
+        inner_cv_jobs=1,
     )[:, 1]
     return _ranked_pairs(scores, groups[held_out] == positive)
 
@@ -396,15 +395,11 @@ def _leave_pair_out_score(
     )
     workers = min(OUTER_CV_JOBS, len(pairs))
     if workers == 1:
-        counts = [
-            _pair_ranks(y, groups, matrix, classes, pair, INNER_CV_JOBS)
-            for pair in pairs
-        ]
+        counts = [_pair_ranks(y, groups, matrix, classes, pair) for pair in pairs]
     else:
         with parallel_backend("loky", inner_max_num_threads=1):
             counts = Parallel(n_jobs=workers)(
-                delayed(_pair_ranks)(y, groups, matrix, classes, pair, 1)
-                for pair in pairs
+                delayed(_pair_ranks)(y, groups, matrix, classes, pair) for pair in pairs
             )
     correct = sum(pair_correct for pair_correct, _ in counts)
     total = sum(pair_total for _, pair_total in counts)
