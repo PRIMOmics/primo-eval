@@ -356,6 +356,29 @@ def _ranked_pairs(scores: np.ndarray, is_positive: np.ndarray) -> tuple[float, i
     return float((gaps > 0).sum() + 0.5 * (gaps == 0).sum()), int(gaps.size)
 
 
+def _pair_ranks(
+    y: np.ndarray,
+    groups: np.ndarray,
+    matrix: np.ndarray,
+    classes: np.ndarray,
+    pair: tuple[str, str],
+    inner_cv_jobs: int,
+) -> tuple[float, int]:
+    """Fit without one subject pair, then count its sample pairs ranked right."""
+    positive, negative = pair
+    held_out = np.isin(groups, [positive, negative])
+    scores = fit_predict(
+        "classification",
+        matrix[~held_out],
+        y[~held_out],
+        matrix[held_out],
+        classes,
+        groups[~held_out],
+        inner_cv_jobs,
+    )[:, 1]
+    return _ranked_pairs(scores, groups[held_out] == positive)
+
+
 def _leave_pair_out_score(
     y: np.ndarray, groups: np.ndarray, matrix: np.ndarray, classes: np.ndarray
 ) -> float:
@@ -365,23 +388,26 @@ def _leave_pair_out_score(
     grouped by subject as in CV.
     """
     per_subject = _subject_labels(y, groups)
-    correct, total = 0.0, 0
-    for positive, negative in itertools.product(
-        per_subject.index[per_subject == classes[1]],
-        per_subject.index[per_subject == classes[0]],
-    ):
-        held_out = np.isin(groups, [positive, negative])
-        scores = fit_predict(
-            "classification",
-            matrix[~held_out],
-            y[~held_out],
-            matrix[held_out],
-            classes,
-            groups[~held_out],
-        )[:, 1]
-        pair_correct, pair_total = _ranked_pairs(scores, groups[held_out] == positive)
-        correct += pair_correct
-        total += pair_total
+    pairs = list(
+        itertools.product(
+            per_subject.index[per_subject == classes[1]],
+            per_subject.index[per_subject == classes[0]],
+        )
+    )
+    workers = min(OUTER_CV_JOBS, len(pairs))
+    if workers == 1:
+        counts = [
+            _pair_ranks(y, groups, matrix, classes, pair, INNER_CV_JOBS)
+            for pair in pairs
+        ]
+    else:
+        with parallel_backend("loky", inner_max_num_threads=1):
+            counts = Parallel(n_jobs=workers)(
+                delayed(_pair_ranks)(y, groups, matrix, classes, pair, 1)
+                for pair in pairs
+            )
+    correct = sum(pair_correct for pair_correct, _ in counts)
+    total = sum(pair_total for _, pair_total in counts)
     return correct / total
 
 
