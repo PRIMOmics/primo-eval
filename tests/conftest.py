@@ -148,7 +148,7 @@ def _write_h5ad(path, obs):
 
 
 def _labels(sample_ids):
-    """Binary labels with two repeats of three folds, every fold holding both classes."""
+    """Binary labels on two repeats of three folds, each fold with both classes."""
     n = len(sample_ids)
     return pd.DataFrame(
         {

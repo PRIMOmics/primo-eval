@@ -366,7 +366,7 @@ def labelled_tasks(data_dir: str | Path, tasks: list[dict]) -> list[dict]:
 def local_fetchers(
     data_dir: str | Path,
 ) -> tuple[Callable[[str], pd.DataFrame], Callable[[str], PerturbationTargets]]:
-    """Readers of the local label and response files, in the form ``score_all`` takes."""
+    """Readers of the local label and response files, as ``score_all`` takes them."""
     data_dir = Path(data_dir)
 
     def fetch_labels(task_id: str) -> pd.DataFrame:
