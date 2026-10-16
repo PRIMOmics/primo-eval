@@ -3,7 +3,7 @@
 ``primo download`` fetches the datasets of one modality from the Hub, with the
 labels of its public tasks. Exit codes: 0 when the command succeeds, 1 when the
 input must be fixed (``SubmissionError``), 2 when the failure is on our side
-(``EvaluatorError``).
+(``EvaluatorError`` or an unexpected error).
 """
 
 import argparse
@@ -117,5 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except EvaluatorError as error:
         logger.error("error on our side: %s", error)
+        return 2
+    except Exception:
+        logger.exception("unexpected error on our side")
         return 2
     return 0

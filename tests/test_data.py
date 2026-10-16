@@ -80,6 +80,23 @@ def test_unknown_modality_raises():
         data.select_datasets(DATASETS, "proteomics", PUBLIC_TASKS)
 
 
+def test_a_modality_missing_from_the_manifest_raises():
+    bulk_only = [entry for entry in DATASETS if entry["modality"] == "bulk RNA"]
+
+    with pytest.raises(EvaluatorError, match="no single-cell-rna dataset"):
+        data.select_datasets(bulk_only, "single-cell-rna", PUBLIC_TASKS)
+
+
+def test_public_only_without_public_datasets_raises():
+    with pytest.raises(SubmissionError, match="public task"):
+        data.select_datasets(DATASETS, "bulk-rna", [], public_only=True)
+
+
+def test_an_empty_list_of_dataset_ids_raises():
+    with pytest.raises(SubmissionError, match="no dataset id"):
+        data.select_datasets(DATASETS, "bulk-rna", PUBLIC_TASKS, dataset_ids=[])
+
+
 def test_the_lock_records_a_hash_and_the_revision_per_file(fake_hub, tmp_path):
     data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
 
@@ -116,6 +133,20 @@ def test_public_tasks_without_labels_are_logged(fake_hub, tmp_path, caplog):
     assert "t905" in caplog.text
 
 
+def test_a_perturbation_task_needs_its_targets(fake_hub, tmp_path):
+    tasks = [
+        {"task_id": "t901", "dataset_id": "d901", "task_type": "perturbation"},
+        {"task_id": "t905", "dataset_id": "d901", "task_type": "perturbation"},
+    ]
+    fake_hub.files["public_tasks/t901/targets.npz"] = b"targets"
+    fake_hub.files["public_tasks/t905/labels.csv"] = b"labels"
+
+    result = data.download(tmp_path, "bulk-rna", tasks=tasks)
+
+    assert result.labelled["d901"] == ["t901"]
+    assert result.unlabelled == ["t905"]
+
+
 def test_a_failed_hub_call_is_an_evaluator_error(fake_hub, tmp_path, monkeypatch):
     def offline(repo_id):
         raise ConnectionError("no network")
@@ -124,6 +155,15 @@ def test_a_failed_hub_call_is_an_evaluator_error(fake_hub, tmp_path, monkeypatch
 
     with pytest.raises(EvaluatorError, match="no network"):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
+
+
+def test_a_dataset_missing_on_the_hub_raises(fake_hub, tmp_path):
+    del fake_hub.files["d902/expression.h5ad"]
+
+    with pytest.raises(EvaluatorError, match="d902/expression.h5ad"):
+        data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
+
+    assert not (tmp_path / "d901").exists()
 
 
 def test_load_manifest_without_datasets_raises(tmp_path):

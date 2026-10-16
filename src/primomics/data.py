@@ -19,7 +19,7 @@ from huggingface_hub.hf_api import RepoFile
 from huggingface_hub.utils import filter_repo_objects
 
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.evaluate import MODALITIES, TASK_ID
+from primomics.evaluate import MODALITIES, PERTURBATION, TASK_ID
 from primomics.submission import DATASET_ID, norm_id
 
 DATA_REPO = "PRIMOmics/primo"
@@ -28,6 +28,7 @@ DATASETS_MANIFEST = "datasets.yaml"
 CARD_FILES = ("README.md", "ATTRIBUTION.md")
 PUBLIC_TASKS_DIR = "public_tasks"
 LABELS_FILE = "labels.csv"
+TARGETS_FILE = "targets.npz"
 LOCK_FILE = "primo-lock.json"
 DEFAULT_DATA_DIR = "primo-data"
 
@@ -83,12 +84,18 @@ def select_datasets(
     in_modality = [
         entry for entry in manifest if entry.get("modality") == MODALITIES[modality]
     ]
+    if not in_modality:
+        raise EvaluatorError(f"no {modality} dataset in the manifest")
     if public_only:
         public = {norm_id(task[DATASET_ID]) for task in tasks}
         in_modality = [entry for entry in in_modality if norm_id(entry["id"]) in public]
+        if not in_modality:
+            raise SubmissionError(f"no {modality} dataset carries a public task")
     if dataset_ids is None:
         return in_modality
     wanted = {norm_id(dataset_id) for dataset_id in dataset_ids}
+    if not wanted:
+        raise SubmissionError("no dataset id given")
     known = {norm_id(entry["id"]) for entry in manifest}
     unknown = sorted(wanted - known)
     if unknown:
@@ -144,16 +151,33 @@ def _repo_files(api: HfApi, revision: str, patterns: list[str]) -> list[RepoFile
     )
 
 
+def _check_hub_covers(datasets: list[dict], paths: set[str]) -> None:
+    """Raise if the Hub lacks the file of a selected dataset: that defect is ours."""
+    missing = [entry["path"] for entry in datasets if entry["path"] not in paths]
+    if missing:
+        raise EvaluatorError(
+            f"{DATASETS_MANIFEST} lists files missing on the Hub: {missing}"
+        )
+
+
+def _task_files(task: dict) -> list[str]:
+    """The repo files a public task needs: labels, and targets for a perturbation."""
+    names = [LABELS_FILE]
+    if task.get("task_type") == PERTURBATION:
+        names.append(TARGETS_FILE)
+    return [f"{PUBLIC_TASKS_DIR}/{norm_id(task[TASK_ID])}/{name}" for name in names]
+
+
 def _labelled_tasks(
     datasets: list[dict], tasks: list[dict], paths: set[str]
 ) -> dict[str, list[str]]:
-    """The public tasks of each dataset whose labels are among ``paths``."""
+    """The public tasks of each dataset whose label files are all among ``paths``."""
     return {
         norm_id(entry["id"]): [
             norm_id(task[TASK_ID])
             for task in tasks
             if norm_id(task[DATASET_ID]) == norm_id(entry["id"])
-            and f"{PUBLIC_TASKS_DIR}/{norm_id(task[TASK_ID])}/{LABELS_FILE}" in paths
+            and paths.issuperset(_task_files(task))
         ]
         for entry in datasets
     }
@@ -169,8 +193,8 @@ def download(
 ) -> Download:
     """Fetch the latest datasets of one modality, and the labels of its public tasks.
 
-    ``tasks`` are the public tasks; a public task whose labels are not on the Hub
-    is reported in ``unlabelled`` rather than failing the download.
+    ``tasks`` are the public tasks; a public task whose label files are not on the
+    Hub is reported in ``unlabelled`` rather than failing the download.
     """
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +225,8 @@ def download(
     ]
     with _hub_errors():
         files = _repo_files(api, revision, patterns)
+        paths = {file.path for file in files}
+        _check_hub_covers(datasets, paths)
         snapshot_download(
             DATA_REPO,
             repo_type=REPO_TYPE,
@@ -209,7 +235,7 @@ def download(
             allow_patterns=patterns,
         )
     _update_lock(data_dir, revision, files)
-    labelled = _labelled_tasks(datasets, tasks, {file.path for file in files})
+    labelled = _labelled_tasks(datasets, tasks, paths)
     found = {task_id for ids in labelled.values() for task_id in ids}
     unlabelled = [task_id for task_id in task_ids if task_id not in found]
     if unlabelled:

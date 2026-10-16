@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+import yaml
 
 from primomics import cli
 
@@ -68,6 +69,16 @@ def test_a_failure_on_our_side_exits_with_2(
 
     assert code == 2
     assert "on our side" in caplog.text
+
+
+def test_an_unexpected_error_exits_with_2(fake_hub, public_tasks, tmp_path, caplog):
+    manifest = {"datasets": [{"id": "d901", "modality": "bulk RNA"}]}
+    fake_hub.files["datasets.yaml"] = yaml.safe_dump(manifest).encode()
+
+    code = cli.main(["download", "--modality", "bulk-rna", "--data-dir", str(tmp_path)])
+
+    assert code == 2
+    assert "KeyError: 'path'" in caplog.text
 
 
 def test_a_missing_modality_is_an_argparse_error(capsys):
