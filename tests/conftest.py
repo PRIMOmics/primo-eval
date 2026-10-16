@@ -12,7 +12,7 @@ import yaml
 from huggingface_hub.hf_api import RepoFile
 from huggingface_hub.utils import filter_repo_objects
 
-from primomics import cli, data
+from primomics import cli, data, submit
 
 REVISION = "0123456789abcdef"
 DATASETS = [
@@ -73,6 +73,7 @@ class FakeHub:
     def __init__(self, files):
         self.files = files
         self.revision = REVISION
+        self.hashes = {}
 
     def dataset_info(self, repo_id):
         return SimpleNamespace(sha=self.revision)
@@ -81,7 +82,8 @@ class FakeHub:
         for path, content in self.files.items():
             lfs = None
             if path.endswith(".h5ad"):
-                lfs = {"size": len(content), "oid": f"sha-{path}", "pointerSize": 1}
+                sha = self.hashes.get(path, f"sha-{path}")
+                lfs = {"size": len(content), "oid": sha, "pointerSize": 1}
             yield RepoFile(path=path, size=len(content), oid=f"blob-{path}", lfs=lfs)
 
     def _write(self, local_dir, path):
@@ -161,6 +163,11 @@ def _labels(sample_ids):
     )
 
 
+def _hub_hash(path):
+    """The hash ``FakeHub`` gives a file that has not changed."""
+    return f"sha-{path}" if path.endswith(".h5ad") else f"blob-{path}"
+
+
 @pytest.fixture
 def local_data(tmp_path):
     """A data folder as ``primo download`` leaves it, with labels for t901 only."""
@@ -178,7 +185,7 @@ def local_data(tmp_path):
     labels.parent.mkdir(parents=True)
     _labels(BULK_SAMPLES["d901"]).to_csv(labels, index=False)
     lock = {
-        path: {"revision": REVISION, "hash": f"hash-{path}"}
+        path: {"revision": REVISION, "hash": _hub_hash(path)}
         for path in (
             "datasets.yaml",
             "d901/expression.h5ad",
@@ -212,3 +219,33 @@ def signal_blocks(seed=0):
     matrix[:, 0] += 3.0 * np.array([i % 2 for i in range(len(ids))])
     noise = rng.normal(size=(len(BULK_SAMPLES["d902"]), 4))
     return {"d901": (ids, matrix), "d902": (BULK_SAMPLES["d902"], noise)}
+
+
+class FakeSpace:
+    """Stands for the leaderboard Space: records each call, sends ``reply`` back."""
+
+    def __init__(self):
+        self.calls = []
+        self.reply = {
+            "status": "published",
+            "message": "scored and published",
+            "submission_id": "s-901",
+        }
+
+    def client(self, src, **kwargs):
+        space = self
+
+        class Client:
+            def predict(self, *args, api_name=None):
+                space.calls.append({"src": src, "args": args, "api_name": api_name})
+                return space.reply
+
+        return Client()
+
+
+@pytest.fixture
+def fake_space(monkeypatch):
+    """Route ``primomics.submit`` to a ``FakeSpace``."""
+    space = FakeSpace()
+    monkeypatch.setattr(submit, "Client", space.client)
+    return space

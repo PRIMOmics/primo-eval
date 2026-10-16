@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "anndata>=0.10",
+    "gradio-client>=1.0,<2",
     "huggingface-hub>=0.33",
     "joblib",
     "numpy",

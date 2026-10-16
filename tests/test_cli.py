@@ -257,3 +257,116 @@ def test_the_report_lists_only_the_files_of_the_datasets_in_the_file(
 def test_the_spread_over_repeats_is_the_sample_sd():
     assert cli._sd((0.8, 0.9)) == "0.071"
     assert cli._sd((0.8,)) == "-"
+
+
+@pytest.fixture
+def logged_in(monkeypatch):
+    monkeypatch.setattr(cli, "get_token", lambda: "hf_test")
+
+
+def _submit(submission, data_dir, *extra):
+    return cli.main(
+        [
+            "submit",
+            str(submission),
+            "--modality",
+            "bulk-rna",
+            "--model-name",
+            "model-901",
+            "--email",
+            "me@example.org",
+            "--data-dir",
+            str(data_dir),
+            *extra,
+        ]
+    )
+
+
+def test_submit_sends_a_checked_file(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data, "--authors")
+
+    assert code == 0
+    [call] = fake_space.calls
+    assert call["args"][0]["path"] == str(submission)
+    assert call["args"][4] is True
+    assert "scored and published" in caplog.text
+    assert "Submission id: s-901" in caplog.text
+
+
+def test_submit_dry_run_sends_nothing(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data, "--dry-run")
+
+    assert code == 0
+    assert fake_space.calls == []
+    assert "ready to submit" in caplog.text
+
+
+def test_submit_without_a_token_asks_for_a_login(
+    fake_hub, fake_space, public_tasks, local_data, tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr(cli, "get_token", lambda: None)
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data)
+
+    assert code == 1
+    assert fake_space.calls == []
+    assert "hf auth login" in caplog.text
+
+
+def test_submit_refuses_data_that_changed_on_the_hub(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    fake_hub.hashes["d902/expression.h5ad"] = "a newer matrix"
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data)
+
+    assert code == 1
+    assert fake_space.calls == []
+    assert "['d902'] changed on the Hub" in caplog.text
+
+
+def test_submit_stops_on_a_failed_check(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path
+):
+    blocks = signal_blocks()
+    ids, matrix = blocks["d902"]
+    blocks["d902"] = (ids[:5], matrix[:5])
+    submission = write_submission(tmp_path / "sub.parquet", blocks)
+
+    code = _submit(submission, local_data)
+
+    assert code == 1
+    assert fake_space.calls == []
+
+
+@pytest.mark.parametrize(("status", "code"), [("refused", 1), ("error", 2)])
+def test_submit_maps_the_reply_of_the_space_to_an_exit_code(
+    fake_hub,
+    fake_space,
+    logged_in,
+    public_tasks,
+    local_data,
+    tmp_path,
+    caplog,
+    status,
+    code,
+):
+    fake_space.reply = {
+        "status": status,
+        "message": "this model name belongs to another account",
+        "submission_id": None,
+    }
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    assert _submit(submission, local_data) == code
+    assert "belongs to another account" in caplog.text

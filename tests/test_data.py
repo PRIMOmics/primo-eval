@@ -321,3 +321,13 @@ def test_locked_files_keep_the_manifest_and_the_given_datasets_and_tasks(local_d
         "datasets.yaml",
         "public_tasks/t901/labels.csv",
     ]
+
+
+def test_changed_datasets_is_empty_when_the_lock_matches_the_hub(fake_hub, local_data):
+    assert data.changed_datasets(local_data, DATASETS[:2]) == []
+
+
+def test_changed_datasets_lists_changed_and_unlocked_files(fake_hub, local_data):
+    fake_hub.hashes["d902/expression.h5ad"] = "a newer matrix"
+
+    assert data.changed_datasets(local_data, DATASETS) == ["d902", "d903"]
