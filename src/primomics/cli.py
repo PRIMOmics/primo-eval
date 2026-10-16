@@ -46,7 +46,7 @@ def _size(n_bytes: int) -> str:
 def _log_download(result: Download, data_dir: str) -> None:
     """One line per dataset: its samples and its public tasks with labels."""
     logger.info(
-        "Downloaded %d dataset(s), %s, to %s (revision %s).",
+        "%d dataset(s), %s, up to date in %s (revision %s).",
         len(result.datasets),
         _size(result.n_bytes),
         data_dir,
@@ -108,7 +108,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run one ``primo`` command and return its exit code."""
     args = _parser().parse_args(argv)
-    logging.basicConfig(format="%(message)s", stream=sys.stdout)
+    logging.basicConfig(format="%(message)s")
     logging.getLogger("primomics").setLevel(logging.INFO)
     try:
         args.run(args)

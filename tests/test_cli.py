@@ -1,4 +1,6 @@
 import logging
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -18,6 +20,7 @@ def test_download_lists_each_dataset_with_its_public_tasks(
 
     assert code == 0
     assert (tmp_path / "d901" / "expression.h5ad").exists()
+    assert "up to date in" in caplog.text
     lines = caplog.text.splitlines()
     assert any("d901" in line and "t901" in line for line in lines)
     assert any("d902" in line and line.rstrip().endswith("-") for line in lines)
@@ -79,6 +82,23 @@ def test_an_unexpected_error_exits_with_2(fake_hub, public_tasks, tmp_path, capl
 
     assert code == 2
     assert "KeyError: 'path'" in caplog.text
+
+
+def test_errors_go_to_stderr(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    script = "import sys; from primomics.cli import main; sys.exit(main(sys.argv[1:]))"
+    args = ["download", "--modality", "bulk-rna", "--data-dir", str(tmp_path)]
+
+    result = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "on our side" in result.stderr
+    assert result.stdout == ""
 
 
 def test_a_missing_modality_is_an_argparse_error(capsys):

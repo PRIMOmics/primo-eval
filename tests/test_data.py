@@ -34,7 +34,7 @@ def test_download_fetches_one_modality_and_its_public_labels(fake_hub, tmp_path)
     assert result.unlabelled == ["t905"]
 
 
-def test_download_counts_the_bytes_it_fetched(fake_hub, tmp_path):
+def test_download_reports_the_size_of_the_selection(fake_hub, tmp_path):
     result = data.download(tmp_path, "single-cell-rna", tasks=PUBLIC_TASKS)
 
     expected = [
