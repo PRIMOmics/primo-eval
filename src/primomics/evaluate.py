@@ -1,7 +1,7 @@
 """Score a submission: each task with the probe, then per-family means and coverage.
 
 A task is scored over its frozen CV folds, or over a fixed transfer split. Binary
-tasks too small for their folds use leave-pair-out over subject pairs instead. A
+tasks with fewer than 30 subjects use leave-pair-out over subject pairs instead. A
 perturbation task decodes a hidden response matrix instead of one label. The
 caller passes the datasets, the tasks and functions that return a task's labels
 and responses, so this module never knows where they are stored.
@@ -60,7 +60,7 @@ REPRESENTATIONS = (EMBEDDING, GENE_SPACE)
 
 OUTER_CV_JOBS = min(10, cpu_count())
 OUTER_PARALLEL_MIN_SAMPLES = 30
-MIN_CV_TRAIN_SAMPLES = 20
+MIN_CV_SUBJECTS = 30
 PERTURBATION_TEST_Z_CLIP = 20.0
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF = 1.0
@@ -327,21 +327,16 @@ def _repeated_cv_scores(
     return tuple(float(score) for score in scores)
 
 
-def _min_train_samples(labels: pd.DataFrame) -> int:
-    """Return the size of the smallest training side over every frozen fold."""
-    return min(
-        int((labels[column] != fold).sum())
-        for column in _fold_columns(labels)
-        for fold in labels[column].unique()
-    )
+def _uses_leave_pair_out(metric: str, y: np.ndarray, groups: np.ndarray) -> bool:
+    """Is this a binary AUROC task with fewer than ``MIN_CV_SUBJECTS`` subjects?
 
-
-def _uses_leave_pair_out(metric: str, labels: pd.DataFrame) -> bool:
-    """Is this a binary AUROC task whose folds leave too few training samples?"""
+    Paired tasks, where a subject carries both labels, stay on CV.
+    """
     return (
         metric == "auroc"
-        and labels[LABEL].nunique() == 2
-        and _min_train_samples(labels) < MIN_CV_TRAIN_SAMPLES
+        and len(np.unique(y)) == 2
+        and len(np.unique(groups)) < MIN_CV_SUBJECTS
+        and pd.Series(y).groupby(groups).nunique().max() == 1
     )
 
 
@@ -623,7 +618,7 @@ def score_task(
         except ValueError as error:
             raise SubmissionError(f"transfer task not scoreable: {error}") from error
         repeat_scores = (score,)
-    elif _uses_leave_pair_out(metric, labels):
+    elif _uses_leave_pair_out(metric, y, groups):
         score = _leave_pair_out_score(y, groups, matrix, classes)
         repeat_scores = (score,)
     else:

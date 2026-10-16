@@ -1282,20 +1282,30 @@ def _protocol(monkeypatch, task, labels):
     return "lpo" if result.repeat_scores == (0.25,) else "cv"
 
 
-@pytest.mark.parametrize(("n", "expected"), [(29, "lpo"), (30, "cv")])
-def test_binary_tasks_under_20_training_samples_use_leave_pair_out(
-    monkeypatch, n, expected
+@pytest.mark.parametrize(
+    ("n_subjects", "samples_per_subject", "expected"),
+    [(29, 1, "lpo"), (30, 1, "cv"), (5, 8, "lpo")],
+)
+def test_binary_tasks_under_30_subjects_use_leave_pair_out(
+    monkeypatch, n_subjects, samples_per_subject, expected
 ):
-    labels = _labels(np.arange(n) % 2, _folds(n, 3))
+    labels, _, _ = _small_cohort(n_subjects, samples_per_subject)
     task = _task("t901", "d901", "classification", "auroc")
     assert _protocol(monkeypatch, task, labels) == expected
 
 
-def test_the_smallest_training_fold_of_any_repeat_decides(monkeypatch):
-    uneven = np.repeat([0, 1, 2], [11, 10, 9])
-    labels = _labels(np.arange(30) % 2, _folds(30, 3), repeat_folds=[uneven])
+def test_the_fold_draw_does_not_decide(monkeypatch):
+    uneven = np.repeat([0, 1, 2], [13, 10, 9])
+    labels = _labels(np.arange(32) % 2, _folds(32, 3), repeat_folds=[uneven])
     task = _task("t901", "d901", "classification", "auroc")
-    assert _protocol(monkeypatch, task, labels) == "lpo"
+    assert _protocol(monkeypatch, task, labels) == "cv"
+
+
+def test_paired_binary_tasks_keep_cv(monkeypatch):
+    subjects = np.repeat([f"p{i}" for i in range(10)], 2)
+    labels = _labels(np.tile([0, 1], 10), _folds(20, 3), subjects=subjects)
+    task = _task("t901", "d901", "classification", "auroc")
+    assert _protocol(monkeypatch, task, labels) == "cv"
 
 
 @pytest.mark.parametrize(
