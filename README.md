@@ -15,9 +15,10 @@ Download the datasets of one modality, `bulk-rna` or `single-cell-rna`:
 primo download --modality bulk-rna
 ```
 
-The data comes from the [`PRIMOmics/primo`](https://huggingface.co/datasets/PRIMOmics/primo)
-dataset on the Hugging Face Hub. `primo download` always fetches the latest commit,
-into `primo-data/` by default (`--data-dir` changes it):
+The data comes from the
+[`PRIMOmics/primo`](https://huggingface.co/datasets/PRIMOmics/primo) dataset on the
+Hugging Face Hub. `primo download` always fetches the latest commit, into
+`primo-data/` by default (`--data-dir` changes it):
 
 - one `expression.h5ad` per dataset, listed in `datasets.yaml`;
 - the labels of the public tasks, under `public_tasks/`.
