@@ -21,6 +21,9 @@ uv run ruff format
 - `src/primomics/boards.py` and `ranking.py`: the boards and the Elo ranking on each board.
 - `src/primomics/tasks.py` and `public_tasks.yaml`: the specs of the public tasks and
   their reader.
+- `src/primomics/data.py`: downloads the benchmark data from the Hub and records it
+  in `primo-lock.json`.
+- `src/primomics/cli.py`: the `primo` command.
 - `src/primomics/errors.py`: `SubmissionError` (the submitter fixes it) and
   `EvaluatorError` (we fix it).
 - `tests/`: one test file per module.
