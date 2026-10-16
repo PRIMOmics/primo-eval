@@ -1,5 +1,6 @@
 """Task registries: the public task specs shipped with the package, and a reader."""
 
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -19,6 +20,7 @@ def load_tasks_registry(path: str | Path) -> list[dict]:
     if not tasks:
         raise EvaluatorError(f"no tasks in the registry: {path}")
     ids = [norm_id(t[TASK_ID]) for t in tasks]
-    if len(set(ids)) != len(ids):
-        raise EvaluatorError(f"duplicate task_id in the registry: {ids}")
+    duplicates = sorted(task_id for task_id, seen in Counter(ids).items() if seen > 1)
+    if duplicates:
+        raise EvaluatorError(f"duplicate task_id in the registry: {duplicates}")
     return tasks

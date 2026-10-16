@@ -6,7 +6,6 @@ tasks:
   therapeutic_area: Immunology & inflammation
   task_type: regression
   metric: pearson
-  n_samples: 90
 - task_id: t017
   dataset_id: d011
   modality: bulk RNA
@@ -14,7 +13,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 242
 - task_id: t021
   dataset_id: d015
   modality: bulk RNA
@@ -22,7 +20,6 @@ tasks:
   therapeutic_area: Infectious diseases
   task_type: regression
   metric: pearson
-  n_samples: 266
 - task_id: t022
   dataset_id: d016
   modality: bulk RNA
@@ -30,7 +27,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 40
 - task_id: t024
   dataset_id: d018
   modality: bulk RNA
@@ -38,7 +34,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: regression
   metric: pearson
-  n_samples: 176
 - task_id: t025
   dataset_id: d018
   modality: bulk RNA
@@ -46,7 +41,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 176
 - task_id: t028
   dataset_id: d020
   modality: bulk RNA
@@ -54,7 +48,6 @@ tasks:
   therapeutic_area: Metabolic diseases
   task_type: regression
   metric: pearson
-  n_samples: 206
 - task_id: t029
   dataset_id: d020
   modality: bulk RNA
@@ -62,7 +55,6 @@ tasks:
   therapeutic_area: Metabolic diseases
   task_type: regression
   metric: pearson
-  n_samples: 206
 - task_id: t033
   dataset_id: d024
   modality: bulk RNA
@@ -70,7 +62,6 @@ tasks:
   therapeutic_area: Infectious diseases
   task_type: classification
   metric: auroc
-  n_samples: 428
 - task_id: t038
   dataset_id: d028
   modality: bulk RNA
@@ -78,7 +69,6 @@ tasks:
   therapeutic_area: Immunology & inflammation
   task_type: regression
   metric: pearson
-  n_samples: 113
 - task_id: t039
   dataset_id: d029
   modality: bulk RNA
@@ -86,7 +76,6 @@ tasks:
   therapeutic_area: Other
   task_type: classification
   metric: auroc
-  n_samples: 101
 - task_id: t042
   dataset_id: d031
   modality: bulk RNA
@@ -94,7 +83,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 268
 - task_id: t043
   dataset_id: d032
   modality: bulk RNA
@@ -102,7 +90,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 108
 - task_id: t047
   dataset_id: d035
   modality: bulk RNA
@@ -110,7 +97,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: perturbation
   metric: centered_spearman
-  n_samples: 36
   pairing: paired
   n_top_de_genes: 600
 - task_id: t049
@@ -120,7 +106,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: perturbation
   metric: centered_spearman
-  n_samples: 23
   pairing: paired
   n_top_de_genes: 600
 - task_id: t050
@@ -130,7 +115,6 @@ tasks:
   therapeutic_area: Infectious diseases
   task_type: regression
   metric: pearson
-  n_samples: 102
 - task_id: t052
   dataset_id: d040
   modality: Single Cell RNA
@@ -138,7 +122,6 @@ tasks:
   therapeutic_area: Immunology & inflammation
   task_type: classification
   metric: auroc
-  n_samples: 20
 - task_id: t053
   dataset_id: d041
   modality: Single Cell RNA
@@ -146,7 +129,6 @@ tasks:
   therapeutic_area: Immunology & inflammation
   task_type: classification
   metric: auroc
-  n_samples: 56
 - task_id: t058
   dataset_id: d046
   modality: Single Cell RNA
@@ -154,7 +136,6 @@ tasks:
   therapeutic_area: Oncology
   task_type: classification
   metric: auroc
-  n_samples: 18
 - task_id: t069
   dataset_id: d053
   modality: bulk RNA
@@ -162,4 +143,3 @@ tasks:
   therapeutic_area: Immunology & inflammation
   task_type: classification
   metric: auroc
-  n_samples: 63

@@ -14,7 +14,6 @@ FIELDS = (
     "therapeutic_area",
     "task_type",
     "metric",
-    "n_samples",
 )
 METRIC_TASK_TYPE = {
     "auroc": "classification",
@@ -30,8 +29,9 @@ def test_load_tasks_registry_duplicate_raises(tmp_path):
         "tasks:\n"
         "  - {task_id: t901, dataset_id: d901}\n"
         "  - {task_id: t901, dataset_id: d902}\n"
+        "  - {task_id: t902, dataset_id: d901}\n"
     )
-    with pytest.raises(EvaluatorError, match="duplicate"):
+    with pytest.raises(EvaluatorError, match=r"duplicate.*\['t901'\]"):
         load_tasks_registry(path)
 
 
