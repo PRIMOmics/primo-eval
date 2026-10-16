@@ -1,11 +1,15 @@
+import hashlib
+import json
 import logging
 import subprocess
 import sys
 
 import pytest
 import yaml
+from conftest import PUBLIC_TASKS, signal_blocks, write_submission
 
-from primomics import cli
+from primomics import cli, data
+from primomics.evaluate import score_all
 
 
 @pytest.fixture(autouse=True)
@@ -107,3 +111,91 @@ def test_a_missing_modality_is_an_argparse_error(capsys):
 
     assert exit_info.value.code == 1
     assert "--modality" in capsys.readouterr().err
+
+
+def _evaluate(submission, data_dir, *extra):
+    return cli.main(
+        [
+            "evaluate",
+            str(submission),
+            "--modality",
+            "bulk-rna",
+            "--data-dir",
+            str(data_dir),
+            *extra,
+        ]
+    )
+
+
+def test_evaluate_scores_public_tasks_and_validates_the_rest(
+    public_tasks, local_data, tmp_path, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    output = tmp_path / "results.json"
+
+    code = _evaluate(submission, local_data, "-o", str(output))
+
+    assert code == 0
+    report = json.loads(output.read_text())
+    assert report["checks"] == {"d901": "ok", "d902": "ok"}
+    assert [score["task_id"] for score in report["per_task"]] == ["t901"]
+    assert report["per_task"][0]["score"] > 0.9
+    assert len(report["per_task"][0]["repeat_scores"]) == 2
+    assert report["n_scored"] == report["n_total"] == 1
+    assert (
+        report["submission"]["sha256"]
+        == hashlib.sha256(submission.read_bytes()).hexdigest()
+    )
+    assert sorted(report["data"]["files"]) == [
+        "d901/expression.h5ad",
+        "d902/expression.h5ad",
+        "public_tasks/t901/labels.csv",
+    ]
+    assert "no local labels, not scored: ['t905']" in caplog.text
+    assert "Validated, scored on submit: d902" in caplog.text
+
+
+def test_evaluate_matches_score_all_on_the_same_files(
+    public_tasks, local_data, tmp_path
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    output = tmp_path / "results.json"
+    fetch_labels, _ = data.local_fetchers(local_data)
+    expected = score_all(
+        submission,
+        datasets=data.local_manifest(local_data),
+        tasks=[PUBLIC_TASKS[0]],
+        fetch_labels=fetch_labels,
+        modality="bulk-rna",
+    )
+
+    _evaluate(submission, local_data, "-o", str(output))
+
+    report = json.loads(output.read_text())
+    assert report["per_task"][0]["score"] == expected["per_task"][0].score
+
+
+def test_evaluate_stops_before_scoring_when_a_dataset_fails(
+    public_tasks, local_data, tmp_path, caplog
+):
+    blocks = signal_blocks()
+    ids, matrix = blocks["d902"]
+    blocks["d902"] = (ids[:5], matrix[:5])
+    submission = write_submission(tmp_path / "sub.parquet", blocks)
+    output = tmp_path / "results.json"
+
+    code = _evaluate(submission, local_data, "-o", str(output))
+
+    assert code == 1
+    assert not output.exists()
+    assert "5/10 samples missing" in caplog.text
+    assert "fix these datasets" in caplog.text
+
+
+def test_evaluate_without_data_asks_for_a_download(public_tasks, tmp_path, caplog):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _evaluate(submission, tmp_path / "nothing")
+
+    assert code == 1
+    assert "run primo download first" in caplog.text

@@ -3,24 +3,41 @@
 Every dataset is one ``expression.h5ad`` listed in ``datasets.yaml``. The public
 tasks also ship their labels under ``public_tasks/``. A download always takes the
 latest commit, and records a hash per file in ``primo-lock.json``, so a score can
-always be traced back to the exact files it was computed on.
+always be traced back to the exact files it was computed on. A submission file is
+checked against the local copy before anything is scored or sent.
 """
 
 import json
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+import anndata
+import numpy as np
+import pandas as pd
 import yaml
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.hf_api import RepoFile
 from huggingface_hub.utils import filter_repo_objects
 
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.evaluate import MODALITIES, PERTURBATION, TASK_ID
-from primomics.submission import DATASET_ID, norm_id
+from primomics.evaluate import (
+    MODALITIES,
+    PERTURBATION,
+    TASK_ID,
+    PerturbationTargets,
+    load_labels,
+    load_targets,
+)
+from primomics.submission import (
+    DATASET_ID,
+    SAMPLE_ID,
+    load_submission,
+    norm_id,
+    to_embedding_frame,
+)
 
 DATA_REPO = "PRIMOmics/primo"
 REPO_TYPE = "dataset"
@@ -31,6 +48,7 @@ LABELS_FILE = "labels.csv"
 TARGETS_FILE = "targets.npz"
 LOCK_FILE = "primo-lock.json"
 DEFAULT_DATA_DIR = "primo-data"
+OK = "ok"
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +87,23 @@ def load_manifest(path: str | Path) -> list[dict]:
     return datasets
 
 
+def local_manifest(data_dir: str | Path) -> list[dict]:
+    """The manifest of a data folder that ``primo download`` filled."""
+    path = Path(data_dir) / DATASETS_MANIFEST
+    if not path.exists():
+        raise SubmissionError(f"no data in {data_dir}: run primo download first")
+    return load_manifest(path)
+
+
+def _modality_label(modality: str) -> str:
+    """The manifest name of a CLI modality, such as ``bulk RNA`` for ``bulk-rna``."""
+    if modality not in MODALITIES:
+        raise SubmissionError(
+            f"unknown modality '{modality}'; expected one of {sorted(MODALITIES)}"
+        )
+    return MODALITIES[modality]
+
+
 def select_datasets(
     manifest: list[dict],
     modality: str,
@@ -77,13 +112,8 @@ def select_datasets(
     dataset_ids: list[str] | None = None,
 ) -> list[dict]:
     """The manifest entries of one modality, optionally narrowed, in manifest order."""
-    if modality not in MODALITIES:
-        raise SubmissionError(
-            f"unknown modality '{modality}'; expected one of {sorted(MODALITIES)}"
-        )
-    in_modality = [
-        entry for entry in manifest if entry.get("modality") == MODALITIES[modality]
-    ]
+    label = _modality_label(modality)
+    in_modality = [entry for entry in manifest if entry.get("modality") == label]
     if not in_modality:
         raise EvaluatorError(f"no {modality} dataset in the manifest")
     if public_only:
@@ -247,3 +277,114 @@ def download(
         unlabelled=unlabelled,
         n_bytes=sum(file.size for file in files),
     )
+
+
+def sample_ids(data_dir: str | Path, entry: dict) -> list[str]:
+    """The ids to embed in one dataset: its samples, or its cells' samples."""
+    adata = anndata.read_h5ad(Path(data_dir) / entry["path"], backed="r")
+    try:
+        if entry.get("observation_level") == "cell":
+            column = adata.obs[entry.get("sample_id_column", SAMPLE_ID)]
+            return [norm_id(value) for value in pd.unique(column)]
+        return [norm_id(value) for value in adata.obs_names]
+    finally:
+        adata.file.close()
+
+
+def _check_block(
+    dataset_id: str,
+    block: pd.DataFrame,
+    entry: dict | None,
+    data_dir: Path,
+    modality: str,
+) -> str:
+    """What is wrong with one dataset of a submission, or ``ok``."""
+    if entry is None:
+        return "unknown dataset id"
+    if entry.get("modality") != _modality_label(modality):
+        return f"not a {modality} dataset"
+    if not (data_dir / entry["path"]).exists():
+        return "not downloaded: run primo download"
+    try:
+        frame = to_embedding_frame(block)
+    except SubmissionError as error:
+        return str(error)
+    if not np.isfinite(frame.to_numpy()).all():
+        return "contains NaN or inf values"
+    expected = sample_ids(data_dir, entry)
+    present = set(frame.index)
+    missing = [sample for sample in expected if sample not in present]
+    if missing:
+        return f"{len(missing)}/{len(expected)} samples missing, e.g. {missing[:5]}"
+    extra = len(present - set(expected))
+    if extra:
+        logger.warning(
+            "%s: %d sample id(s) are not in the dataset and are ignored",
+            dataset_id,
+            extra,
+        )
+    return OK
+
+
+def check_submission(
+    path: str | Path, data_dir: str | Path, modality: str
+) -> dict[str, str]:
+    """One verdict per dataset of a submission file: ``ok``, or what to fix.
+
+    A dataset passes when every sample of its local ``expression.h5ad`` has one
+    finite embedding, which is what scoring needs for every task on it.
+    """
+    data_dir = Path(data_dir)
+    manifest = {norm_id(entry["id"]): entry for entry in local_manifest(data_dir)}
+    return {
+        dataset_id: _check_block(
+            dataset_id, block, manifest.get(dataset_id), data_dir, modality
+        )
+        for dataset_id, block in load_submission(path).items()
+    }
+
+
+def _task_dir(data_dir: Path, task_id: str) -> Path:
+    """The local folder of one public task."""
+    return data_dir / PUBLIC_TASKS_DIR / norm_id(task_id)
+
+
+def labelled_tasks(data_dir: str | Path, tasks: list[dict]) -> list[dict]:
+    """The public tasks whose label files are in the data folder."""
+    data_dir = Path(data_dir)
+    kept = []
+    for task in tasks:
+        names = [LABELS_FILE]
+        if task.get("task_type") == PERTURBATION:
+            names.append(TARGETS_FILE)
+        folder = _task_dir(data_dir, task[TASK_ID])
+        if all((folder / name).exists() for name in names):
+            kept.append(task)
+    return kept
+
+
+def local_fetchers(
+    data_dir: str | Path,
+) -> tuple[Callable[[str], pd.DataFrame], Callable[[str], PerturbationTargets]]:
+    """Readers of the local label and response files, in the form ``score_all`` takes."""
+    data_dir = Path(data_dir)
+
+    def fetch_labels(task_id: str) -> pd.DataFrame:
+        return load_labels(_task_dir(data_dir, task_id) / LABELS_FILE)
+
+    def fetch_targets(task_id: str) -> PerturbationTargets:
+        return load_targets(_task_dir(data_dir, task_id) / TARGETS_FILE)
+
+    return fetch_labels, fetch_targets
+
+
+def locked_files(
+    data_dir: str | Path, datasets: list[dict], task_ids: Iterable[str]
+) -> dict[str, dict]:
+    """The lock entries of the downloaded files of ``datasets`` and ``task_ids``."""
+    files = read_lock(data_dir).get("files", {})
+    prefixes = tuple(
+        [f"{_folder(entry)}/" for entry in datasets]
+        + [f"{PUBLIC_TASKS_DIR}/{norm_id(task_id)}/" for task_id in task_ids]
+    )
+    return {path: entry for path, entry in files.items() if path.startswith(prefixes)}
