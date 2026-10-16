@@ -1218,12 +1218,19 @@ def test_an_unreadable_reference_is_our_error(tmp_path):
 def _fixed_probe(scores, seen):
     """A probe that ignores training and returns a fixed score per row."""
 
-    def fit_predict(task_type, x_train, y_train, x_test, classes, groups_train):
+    def fit_predict(
+        task_type, x_train, y_train, x_test, classes, groups_train, inner_cv_jobs
+    ):
         seen.append((x_train[:, 0].astype(int), x_test[:, 0].astype(int), groups_train))
         positive = scores[x_test[:, 0].astype(int)]
         return np.column_stack([1 - positive, positive])
 
     return fit_predict
+
+
+def _use_fixed_probe(monkeypatch, scores, seen):
+    monkeypatch.setattr(ev, "OUTER_CV_JOBS", 1)
+    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, seen))
 
 
 def _small_cohort(n_subjects, samples_per_subject):
@@ -1245,7 +1252,7 @@ def test_leave_pair_out_with_a_fixed_probe_equals_the_auroc(
     monkeypatch, samples_per_subject
 ):
     labels, matrix, scores = _small_cohort(10, samples_per_subject)
-    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    _use_fixed_probe(monkeypatch, scores, [])
     assert _lpo(labels, matrix) == pytest.approx(
         roc_auc_score(labels[ev.LABEL], scores)
     )
@@ -1254,7 +1261,7 @@ def test_leave_pair_out_with_a_fixed_probe_equals_the_auroc(
 def test_leave_pair_out_holds_out_whole_subjects_and_groups_the_probe(monkeypatch):
     labels, matrix, scores = _small_cohort(8, 2)
     seen = []
-    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, seen))
+    _use_fixed_probe(monkeypatch, scores, seen)
     _lpo(labels, matrix)
     groups = ev._subject_groups(labels)
     assert len(seen) == 4 * 4
@@ -1262,6 +1269,15 @@ def test_leave_pair_out_holds_out_whole_subjects_and_groups_the_probe(monkeypatc
         assert len(np.unique(groups[test])) == 2
         assert set(groups[train]).isdisjoint(groups[test])
         assert groups_train.tolist() == groups[train].tolist()
+
+
+def test_parallel_and_sequential_leave_pair_out_agree(monkeypatch):
+    labels, _, _ = _small_cohort(8, 2)
+    matrix = np.random.default_rng(3).normal(size=(len(labels), 4))
+    monkeypatch.setattr(ev, "OUTER_CV_JOBS", 2)
+    parallel = _lpo(labels, matrix)
+    monkeypatch.setattr(ev, "OUTER_CV_JOBS", 1)
+    assert _lpo(labels, matrix) == parallel
 
 
 def test_small_binary_task_with_signal_scores_one_split():
@@ -1325,7 +1341,7 @@ def test_small_multiclass_and_regression_tasks_keep_cv(
 def test_a_non_finite_leave_pair_out_score_is_invalid(monkeypatch):
     labels, matrix, scores = _small_cohort(4, 1)
     scores[:] = np.nan
-    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    _use_fixed_probe(monkeypatch, scores, [])
     with pytest.raises(SubmissionError, match="non-finite"):
         _lpo(labels, matrix)
 
@@ -1340,7 +1356,7 @@ def test_leave_pair_out_needs_one_label_per_subject():
 
 def test_leave_pair_out_counts_ties_as_half(monkeypatch):
     labels, matrix, _ = _small_cohort(6, 1)
-    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(np.full(6, 0.5), []))
+    _use_fixed_probe(monkeypatch, np.full(6, 0.5), [])
     assert _lpo(labels, matrix) == 0.5
 
 
@@ -1351,6 +1367,6 @@ def test_leave_pair_out_weights_each_subject_pair_by_its_sample_pairs(monkeypatc
     y = np.repeat(np.arange(8) % 2, sizes)
     labels = _labels(y, _folds(len(y), 3), subjects=subjects)
     scores = np.random.default_rng(1).random(len(y))
-    monkeypatch.setattr(ev, "fit_predict", _fixed_probe(scores, []))
+    _use_fixed_probe(monkeypatch, scores, [])
     matrix = np.arange(len(y))[:, None].astype(float)
     assert _lpo(labels, matrix) == pytest.approx(roc_auc_score(y, scores))
