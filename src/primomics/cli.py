@@ -33,7 +33,7 @@ from primomics.data import (
     locked_files,
 )
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.evaluate import MODALITIES, manifest_ids, score_all
+from primomics.evaluate import MODALITIES, TASK_ID, manifest_ids, score_all
 from primomics.submission import DATASET_ID, norm_id
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
@@ -63,12 +63,9 @@ def _size(n_bytes: int) -> str:
 
 
 def _sha256(path: str | Path) -> str:
-    """The sha256 of a file, read in blocks."""
-    digest = hashlib.sha256()
+    """The sha256 of a file."""
     with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def _log_download(result: Download, data_dir: str) -> None:
@@ -105,11 +102,7 @@ def _download(args: argparse.Namespace) -> None:
 
 def _public_tasks(manifest: list[dict], modality: str) -> list[dict]:
     """The public tasks on the datasets of one modality."""
-    in_modality = {
-        norm_id(entry["id"])
-        for entry in manifest
-        if entry.get("modality") == MODALITIES[modality]
-    }
+    in_modality = manifest_ids(manifest, MODALITIES[modality])
     return [
         task
         for task in load_tasks_registry(PUBLIC_TASKS)
@@ -128,7 +121,7 @@ def _sd(repeat_scores: tuple[float, ...]) -> str:
     """The spread over CV repeats, or ``-`` for a single repeat."""
     if len(repeat_scores) < 2:
         return "-"
-    return f"{np.std(repeat_scores):.3f}"
+    return f"{np.std(repeat_scores, ddof=1):.3f}"
 
 
 def _log_scores(result: dict, verdicts: dict[str, str], scored: list[dict]) -> None:
@@ -177,6 +170,9 @@ def _report(
 ) -> dict:
     """The ``results.json`` of one evaluation, with the data it was computed on."""
     in_file = [entry for entry in manifest if norm_id(entry["id"]) in verdicts]
+    used_tasks = [
+        task[TASK_ID] for task in scored if norm_id(task[DATASET_ID]) in verdicts
+    ]
     return {
         "primomics_version": __version__,
         "modality": args.modality,
@@ -186,9 +182,7 @@ def _report(
         },
         "data": {
             "repo": DATA_REPO,
-            "files": locked_files(
-                args.data_dir, in_file, [task["task_id"] for task in scored]
-            ),
+            "files": locked_files(args.data_dir, in_file, used_tasks),
         },
         "checks": verdicts,
         "per_task": [asdict(score) for score in result["per_task"]],
@@ -223,7 +217,7 @@ def _evaluate(args: argparse.Namespace) -> None:
     tasks = _public_tasks(manifest, args.modality)
     scored = labelled_tasks(args.data_dir, tasks)
     unlabelled = [
-        task["task_id"]
+        task[TASK_ID]
         for task in tasks
         if task not in scored and norm_id(task[DATASET_ID]) in verdicts
     ]

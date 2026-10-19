@@ -150,6 +150,7 @@ def test_evaluate_scores_public_tasks_and_validates_the_rest(
     assert sorted(report["data"]["files"]) == [
         "d901/expression.h5ad",
         "d902/expression.h5ad",
+        "datasets.yaml",
         "public_tasks/t901/labels.csv",
     ]
     assert "Scored 1 of 1 labelled public task(s)." in caplog.text
@@ -237,3 +238,22 @@ def test_evaluate_lists_the_datasets_missing_from_the_file(
 
     assert code == 0
     assert "their tasks count as missing on submit: d901" in caplog.text
+
+
+def test_the_report_lists_only_the_files_of_the_datasets_in_the_file(
+    public_tasks, local_data, tmp_path
+):
+    blocks = signal_blocks()
+    del blocks["d901"]
+    submission = write_submission(tmp_path / "sub.parquet", blocks)
+    output = tmp_path / "results.json"
+
+    _evaluate(submission, local_data, "-o", str(output))
+
+    files = json.loads(output.read_text())["data"]["files"]
+    assert sorted(files) == ["d902/expression.h5ad", "datasets.yaml"]
+
+
+def test_the_spread_over_repeats_is_the_sample_sd():
+    assert cli._sd((0.8, 0.9)) == "0.071"
+    assert cli._sd((0.8,)) == "-"

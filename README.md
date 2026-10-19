@@ -34,8 +34,9 @@ primo evaluate submission.parquet --modality bulk-rna -o results.json
 ```
 
 A submission file has one row per sample: a `dataset_id` column, a `sample_id`
-column, then one numeric column per embedding dimension (`.parquet`, `.csv`, `.tsv`
-or `.npz`). In single-cell datasets, the rows of `expression.h5ad` are cells, and
+column, then one numeric column per embedding dimension (`.parquet`, `.csv` or
+`.tsv`). A `.npz` file holds three arrays instead: `dataset_ids`, `sample_ids` and
+`embeddings`. In single-cell datasets, the rows of `expression.h5ad` are cells, and
 `obs["sample_id"]` gives their sample: submit one embedding per sample.
 
 `primo evaluate` checks every dataset of the file against the downloaded data: each

@@ -313,7 +313,11 @@ def test_local_fetchers_read_the_label_files(local_data):
     assert {"subject_id", "label", "fold", "fold_1"} <= set(labels.columns)
 
 
-def test_locked_files_keep_the_files_of_the_given_datasets_and_tasks(local_data):
+def test_locked_files_keep_the_manifest_and_the_given_datasets_and_tasks(local_data):
     files = data.locked_files(local_data, [DATASETS[0]], ["t901"])
 
-    assert sorted(files) == ["d901/expression.h5ad", "public_tasks/t901/labels.csv"]
+    assert sorted(files) == [
+        "d901/expression.h5ad",
+        "datasets.yaml",
+        "public_tasks/t901/labels.csv",
+    ]

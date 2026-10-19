@@ -387,10 +387,14 @@ def local_fetchers(
 def locked_files(
     data_dir: str | Path, datasets: list[dict], task_ids: Iterable[str]
 ) -> dict[str, dict]:
-    """The lock entries of the downloaded files of ``datasets`` and ``task_ids``."""
+    """The lock entries of the manifest, of ``datasets`` and of ``task_ids``."""
     files = read_lock(data_dir).get("files", {})
     prefixes = tuple(
         [f"{_folder(entry)}/" for entry in datasets]
         + [f"{PUBLIC_TASKS_DIR}/{norm_id(task_id)}/" for task_id in task_ids]
     )
-    return {path: entry for path, entry in files.items() if path.startswith(prefixes)}
+    return {
+        path: entry
+        for path, entry in files.items()
+        if path == DATASETS_MANIFEST or path.startswith(prefixes)
+    }
