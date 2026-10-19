@@ -285,6 +285,17 @@ def test_labelled_tasks_keep_the_tasks_with_local_label_files(local_data):
     assert data.labelled_tasks(local_data, [perturbation]) == []
 
 
+def test_a_perturbation_task_with_local_targets_is_labelled(local_data):
+    perturbation = {
+        "task_id": "t901",
+        "dataset_id": "d901",
+        "task_type": "perturbation",
+    }
+    (local_data / data.PUBLIC_TASKS_DIR / "t901" / data.TARGETS_FILE).touch()
+
+    assert data.labelled_tasks(local_data, [perturbation]) == [perturbation]
+
+
 def test_local_fetchers_read_the_label_files(local_data):
     fetch_labels, _ = data.local_fetchers(local_data)
 

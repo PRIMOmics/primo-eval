@@ -350,17 +350,13 @@ def _task_dir(data_dir: Path, task_id: str) -> Path:
 
 
 def labelled_tasks(data_dir: str | Path, tasks: list[dict]) -> list[dict]:
-    """The public tasks whose label files are in the data folder."""
+    """The public tasks whose label files are all in the data folder."""
     data_dir = Path(data_dir)
-    kept = []
-    for task in tasks:
-        names = [LABELS_FILE]
-        if task.get("task_type") == PERTURBATION:
-            names.append(TARGETS_FILE)
-        folder = _task_dir(data_dir, task[TASK_ID])
-        if all((folder / name).exists() for name in names):
-            kept.append(task)
-    return kept
+    return [
+        task
+        for task in tasks
+        if all((data_dir / path).exists() for path in _task_files(task))
+    ]
 
 
 def local_fetchers(
