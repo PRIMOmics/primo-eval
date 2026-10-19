@@ -309,6 +309,19 @@ def test_submit_dry_run_sends_nothing(
     assert "ready to submit" in caplog.text
 
 
+def test_submit_lists_the_datasets_missing_from_the_file(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    blocks = signal_blocks()
+    del blocks["d901"]
+    submission = write_submission(tmp_path / "sub.parquet", blocks)
+
+    code = _submit(submission, local_data, "--dry-run")
+
+    assert code == 0
+    assert "their tasks count as missing on submit: d901" in caplog.text
+
+
 def test_submit_without_a_token_asks_for_a_login(
     fake_hub, fake_space, public_tasks, local_data, tmp_path, monkeypatch, caplog
 ):

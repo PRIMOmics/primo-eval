@@ -200,8 +200,8 @@ def _report(
     }
 
 
-def _checked(args: argparse.Namespace) -> dict[str, str]:
-    """Check the submission file, and stop when one of its datasets fails."""
+def _checked(args: argparse.Namespace) -> tuple[dict[str, str], list[dict]]:
+    """Check the submission file: stop on a failed dataset, warn about absent ones."""
     verdicts = check_submission(args.submission, args.data_dir, args.modality)
     _log_checks(verdicts)
     failed = sorted(
@@ -209,14 +209,6 @@ def _checked(args: argparse.Namespace) -> dict[str, str]:
     )
     if failed:
         raise SubmissionError(f"fix these datasets, then run again: {failed}")
-    return verdicts
-
-
-def _evaluate(args: argparse.Namespace) -> None:
-    """Run ``primo evaluate``."""
-    if args.output and not Path(args.output).parent.is_dir():
-        raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
-    verdicts = _checked(args)
     manifest = local_manifest(args.data_dir)
     absent = sorted(manifest_ids(manifest, MODALITIES[args.modality]) - set(verdicts))
     if absent:
@@ -224,6 +216,14 @@ def _evaluate(args: argparse.Namespace) -> None:
             "missing from the file, their tasks count as missing on submit: %s",
             ", ".join(absent),
         )
+    return verdicts, manifest
+
+
+def _evaluate(args: argparse.Namespace) -> None:
+    """Run ``primo evaluate``."""
+    if args.output and not Path(args.output).parent.is_dir():
+        raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
+    verdicts, manifest = _checked(args)
     tasks = _public_tasks(manifest, args.modality)
     scored = labelled_tasks(args.data_dir, tasks)
     unlabelled = [
@@ -251,12 +251,8 @@ def _evaluate(args: argparse.Namespace) -> None:
 
 def _submit(args: argparse.Namespace) -> None:
     """Run ``primo submit``."""
-    verdicts = _checked(args)
-    in_file = [
-        entry
-        for entry in local_manifest(args.data_dir)
-        if norm_id(entry["id"]) in verdicts
-    ]
+    verdicts, manifest = _checked(args)
+    in_file = [entry for entry in manifest if norm_id(entry["id"]) in verdicts]
     changed = changed_datasets(args.data_dir, in_file)
     if changed:
         raise SubmissionError(
