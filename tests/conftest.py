@@ -236,8 +236,8 @@ class FakeSpace:
         space = self
 
         class Client:
-            def predict(self, *args, api_name=None):
-                space.calls.append({"src": src, "args": args, "api_name": api_name})
+            def predict(self, *, api_name=None, **fields):
+                space.calls.append({"src": src, "fields": fields, "api_name": api_name})
                 return space.reply
 
         return Client()

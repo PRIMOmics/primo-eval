@@ -1,12 +1,13 @@
 """Send a submission file to the leaderboard Space, which scores every task.
 
-The Space exposes a ``/submit`` endpoint. It takes, in this order: the file, the
-modality, the model name, the institution, whether the model's authors submit
-it, the contact email, the paper link, the Hugging Face model link, the notes
-and the caller's Hugging Face token. The Space reads the token only to learn who
-submits, so a model name stays with the account that first used it. It replies
-with a ``status`` (``published``, ``refused`` or ``error``), a ``message`` and a
-``submission_id``.
+The Space exposes a ``/submit`` endpoint whose inputs carry the names of the web
+form's ``/evaluate`` endpoint: ``submission_path``, ``modality``, ``model_name``,
+``institution``, ``is_author_submission``, ``email``, ``paper_link``,
+``hf_model_link`` and ``notes``, plus ``token``, the caller's Hugging Face token.
+They are passed by name, so a renamed or missing input raises an error instead of
+filling the wrong field. The Space reads the token only to learn who submits, so a
+model name stays with the account that first used it. It replies with a ``status``
+(``published``, ``refused`` or ``error``), a ``message`` and a ``submission_id``.
 """
 
 from pathlib import Path
@@ -42,16 +43,16 @@ def submit(
             space, verbose=False, download_files=False, analytics_enabled=False
         )
         reply = client.predict(
-            handle_file(str(path)),
-            modality,
-            model_name,
-            institution,
-            authors,
-            email,
-            paper_link,
-            hf_model_link,
-            notes,
-            token,
+            submission_path=handle_file(str(path)),
+            modality=modality,
+            model_name=model_name,
+            institution=institution,
+            is_author_submission=authors,
+            email=email,
+            paper_link=paper_link,
+            hf_model_link=hf_model_link,
+            notes=notes,
+            token=token,
             api_name=SUBMIT_API,
         )
     except Exception as error:

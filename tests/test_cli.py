@@ -291,8 +291,8 @@ def test_submit_sends_a_checked_file(
 
     assert code == 0
     [call] = fake_space.calls
-    assert call["args"][0]["path"] == str(submission)
-    assert call["args"][4] is True
+    assert call["fields"]["submission_path"]["path"] == str(submission)
+    assert call["fields"]["is_author_submission"] is True
     assert "scored and published" in caplog.text
     assert "Submission id: s-901" in caplog.text
 
