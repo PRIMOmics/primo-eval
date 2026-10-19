@@ -134,7 +134,9 @@ def _sd(repeat_scores: tuple[float, ...]) -> str:
 def _log_scores(result: dict, verdicts: dict[str, str], scored: list[dict]) -> None:
     """The score of each public task, the family means, and what was not scored."""
     logger.info(
-        "Scored %d of %d public task(s).", result["n_scored"], result["n_total"]
+        "Scored %d of %d labelled public task(s).",
+        result["n_scored"],
+        result["n_total"],
     )
     if result["per_task"]:
         logger.info("%-8s %-18s %7s %7s %6s", "task", "metric", "score", "sd", "n")
@@ -175,6 +177,7 @@ def _report(
     manifest: list[dict],
     verdicts: dict[str, str],
     scored: list[dict],
+    unlabelled: list[str],
     result: dict,
 ) -> dict:
     """The ``results.json`` of one evaluation, with the data it was computed on."""
@@ -201,6 +204,7 @@ def _report(
         "n_total": result["n_total"],
         "invalid": result["invalid"],
         "missing": result["missing"],
+        "unlabelled": unlabelled,
     }
 
 
@@ -235,7 +239,7 @@ def _evaluate(args: argparse.Namespace) -> None:
     )
     _log_scores(result, verdicts, scored)
     if args.output:
-        report = _report(args, manifest, verdicts, scored, result)
+        report = _report(args, manifest, verdicts, scored, unlabelled, result)
         Path(args.output).write_text(json.dumps(report, indent=2))
         logger.info("Wrote %s.", args.output)
 

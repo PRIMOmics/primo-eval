@@ -142,6 +142,7 @@ def test_evaluate_scores_public_tasks_and_validates_the_rest(
     assert report["per_task"][0]["score"] > 0.9
     assert len(report["per_task"][0]["repeat_scores"]) == 2
     assert report["n_scored"] == report["n_total"] == 1
+    assert report["unlabelled"] == ["t905"]
     assert (
         report["submission"]["sha256"]
         == hashlib.sha256(submission.read_bytes()).hexdigest()
@@ -151,6 +152,7 @@ def test_evaluate_scores_public_tasks_and_validates_the_rest(
         "d902/expression.h5ad",
         "public_tasks/t901/labels.csv",
     ]
+    assert "Scored 1 of 1 labelled public task(s)." in caplog.text
     assert "no local labels, not scored: ['t905']" in caplog.text
     assert "Validated, scored on submit: d902" in caplog.text
 
