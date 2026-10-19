@@ -153,6 +153,7 @@ def test_evaluate_scores_public_tasks_and_validates_the_rest(
         "public_tasks/t901/labels.csv",
     ]
     assert "Scored 1 of 1 labelled public task(s)." in caplog.text
+    assert "missing from the file" not in caplog.text
     assert "no local labels, not scored: ['t905']" in caplog.text
     assert "Validated, scored on submit: d902" in caplog.text
 
@@ -223,3 +224,16 @@ def test_evaluate_checks_the_output_folder_before_scoring(
     assert code == 1
     assert "its folder does not exist" in caplog.text
     assert "Scored" not in caplog.text
+
+
+def test_evaluate_lists_the_datasets_missing_from_the_file(
+    public_tasks, local_data, tmp_path, caplog
+):
+    blocks = signal_blocks()
+    del blocks["d901"]
+    submission = write_submission(tmp_path / "sub.parquet", blocks)
+
+    code = _evaluate(submission, local_data)
+
+    assert code == 0
+    assert "their tasks count as missing on submit: d901" in caplog.text

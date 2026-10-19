@@ -41,10 +41,11 @@ or `.npz`). In single-cell datasets, the rows of `expression.h5ad` are cells, an
 `primo evaluate` checks every dataset of the file against the downloaded data: each
 sample of `expression.h5ad` needs one finite embedding. It then scores the public
 tasks of those datasets with the leaderboard protocol, and lists the other
-datasets as validated: the leaderboard scores them. `--representation
-gene_space` keeps the scale of gene-level features; the default, `embedding`, puts
-each row on the unit sphere first. `results.json` holds every score, with the
-version of `primomics` and the hashes of the data files.
+datasets as validated: the leaderboard scores them. Each embedding is put on the
+unit sphere first, as on the leaderboard. The datasets of the modality that are
+missing from the file are listed too: on submit, their tasks count as missing.
+`results.json` holds every score, with the version of `primomics` and the hashes of
+the data files.
 
 ## Development
 

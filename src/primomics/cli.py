@@ -33,7 +33,7 @@ from primomics.data import (
     locked_files,
 )
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.evaluate import EMBEDDING, MODALITIES, REPRESENTATIONS, score_all
+from primomics.evaluate import MODALITIES, manifest_ids, score_all
 from primomics.submission import DATASET_ID, norm_id
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
@@ -159,11 +159,6 @@ def _log_scores(result: dict, verdicts: dict[str, str], scored: list[dict]) -> N
         )
     for item in result["invalid"]:
         logger.warning("not scored: %s (%s)", item["task_id"], item["reason"])
-    if result["missing"]:
-        logger.info(
-            "Datasets with public tasks missing from the file: %s",
-            ", ".join(result["missing"]),
-        )
     with_labels = {norm_id(task[DATASET_ID]) for task in scored}
     validated = sorted(
         dataset_id for dataset_id in verdicts if dataset_id not in with_labels
@@ -185,7 +180,6 @@ def _report(
     return {
         "primomics_version": __version__,
         "modality": args.modality,
-        "representation": args.representation,
         "submission": {
             "file": Path(args.submission).name,
             "sha256": _sha256(args.submission),
@@ -220,6 +214,12 @@ def _evaluate(args: argparse.Namespace) -> None:
     if failed:
         raise SubmissionError(f"fix these datasets, then run again: {failed}")
     manifest = local_manifest(args.data_dir)
+    absent = sorted(manifest_ids(manifest, MODALITIES[args.modality]) - set(verdicts))
+    if absent:
+        logger.warning(
+            "missing from the file, their tasks count as missing on submit: %s",
+            ", ".join(absent),
+        )
     tasks = _public_tasks(manifest, args.modality)
     scored = labelled_tasks(args.data_dir, tasks)
     unlabelled = [
@@ -237,7 +237,6 @@ def _evaluate(args: argparse.Namespace) -> None:
         fetch_labels=fetch_labels,
         fetch_targets=fetch_targets,
         modality=args.modality,
-        representation=args.representation,
     )
     _log_scores(result, verdicts, scored)
     if args.output:
@@ -289,15 +288,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     score.add_argument("submission", help="a .parquet, .csv, .tsv or .npz file")
     score.add_argument("--modality", required=True, choices=sorted(MODALITIES))
-    score.add_argument(
-        "--representation",
-        default=EMBEDDING,
-        choices=REPRESENTATIONS,
-        help=(
-            "embedding: rows are L2-normalised before the probe; gene_space: "
-            f"the columns are genes and keep their scale (default: {EMBEDDING})"
-        ),
-    )
     _add_data_dir(score, "read")
     score.add_argument("-o", "--output", help="write the results to this JSON file")
     score.set_defaults(run=_evaluate)
