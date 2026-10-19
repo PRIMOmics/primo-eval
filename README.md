@@ -27,6 +27,27 @@ Use `--public-only` for the datasets that carry a public task, or `--datasets` f
 comma-separated list of ids. `primo-lock.json` records the commit and a hash of
 every downloaded file.
 
+Embed the datasets with your model, then score the file:
+
+```bash
+primo evaluate submission.parquet --modality bulk-rna -o results.json
+```
+
+A submission file has one row per sample: a `dataset_id` column, a `sample_id`
+column, then one numeric column per embedding dimension (`.parquet`, `.csv` or
+`.tsv`). A `.npz` file holds three arrays instead: `dataset_ids`, `sample_ids` and
+`embeddings`. In single-cell datasets, the rows of `expression.h5ad` are cells, and
+`obs["sample_id"]` gives their sample: submit one embedding per sample.
+
+`primo evaluate` checks every dataset of the file against the downloaded data: each
+sample of `expression.h5ad` needs one finite embedding. It then scores the public
+tasks of those datasets with the leaderboard protocol, and lists the other
+datasets as validated: the leaderboard scores them. Each embedding is put on the
+unit sphere first, as on the leaderboard. The datasets of the modality that are
+missing from the file are listed too: on submit, their tasks count as missing.
+`results.json` holds every score, with the version of `primomics` and the hashes of
+the data files.
+
 ## Development
 
 With [uv](https://docs.astral.sh/uv/), which also installs Python 3.12 if needed:
