@@ -201,3 +201,25 @@ def test_evaluate_without_data_asks_for_a_download(public_tasks, tmp_path, caplo
 
     assert code == 1
     assert "run primo download first" in caplog.text
+
+
+def test_evaluate_of_a_missing_file_is_the_users_error(
+    public_tasks, local_data, tmp_path, caplog
+):
+    code = _evaluate(tmp_path / "typo.parquet", local_data)
+
+    assert code == 1
+    assert "cannot read" in caplog.text
+
+
+def test_evaluate_checks_the_output_folder_before_scoring(
+    public_tasks, local_data, tmp_path, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    output = tmp_path / "missing" / "results.json"
+
+    code = _evaluate(submission, local_data, "-o", str(output))
+
+    assert code == 1
+    assert "its folder does not exist" in caplog.text
+    assert "Scored" not in caplog.text

@@ -326,6 +326,16 @@ def _check_block(
     return OK
 
 
+def _read_submission(path: str | Path) -> dict[str, pd.DataFrame]:
+    """The blocks of a submission file; a file that cannot be read is the user's."""
+    try:
+        return load_submission(path)
+    except SubmissionError:
+        raise
+    except (OSError, ValueError) as error:
+        raise SubmissionError(f"cannot read {path}: {error}") from error
+
+
 def check_submission(
     path: str | Path, data_dir: str | Path, modality: str
 ) -> dict[str, str]:
@@ -340,7 +350,7 @@ def check_submission(
         dataset_id: _check_block(
             dataset_id, block, manifest.get(dataset_id), data_dir, modality
         )
-        for dataset_id, block in load_submission(path).items()
+        for dataset_id, block in _read_submission(path).items()
     }
 
 

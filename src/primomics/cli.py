@@ -210,6 +210,8 @@ def _report(
 
 def _evaluate(args: argparse.Namespace) -> None:
     """Run ``primo evaluate``."""
+    if args.output and not Path(args.output).parent.is_dir():
+        raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
     verdicts = check_submission(args.submission, args.data_dir, args.modality)
     _log_checks(verdicts)
     failed = sorted(

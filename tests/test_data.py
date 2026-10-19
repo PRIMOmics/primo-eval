@@ -274,6 +274,14 @@ def test_check_without_downloaded_data_raises(tmp_path):
         data.check_submission(path, tmp_path / "empty", "bulk-rna")
 
 
+def test_check_of_a_file_that_cannot_be_read_raises(local_data, tmp_path):
+    path = tmp_path / "sub.parquet"
+    path.write_bytes(b"not a parquet file")
+
+    with pytest.raises(SubmissionError, match="cannot read"):
+        data.check_submission(path, local_data, "bulk-rna")
+
+
 def test_labelled_tasks_keep_the_tasks_with_local_label_files(local_data):
     perturbation = {
         "task_id": "t901",
