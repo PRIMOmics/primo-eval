@@ -36,9 +36,9 @@ N_COMPONENTS = 50
 RANDOM_STATE = 0
 
 
-def prediction_ids(adata: ad.AnnData) -> np.ndarray:
+def prediction_ids(adata: ad.AnnData, cells: bool) -> np.ndarray:
     """Opaque collection-sample ids required in the submission."""
-    if SAMPLE_ID in adata.obs:
+    if cells:
         return pd.unique(adata.obs[SAMPLE_ID].astype(str)).astype(str)
     return adata.obs_names.astype(str).to_numpy()
 
@@ -50,10 +50,10 @@ def _log_normalize(x, target_sum: int) -> np.ndarray:
     return np.log2(x / np.where(totals == 0, 1, totals) * target_sum + 1)
 
 
-def _sample_expression(adata: ad.AnnData) -> tuple[np.ndarray, np.ndarray]:
+def _sample_expression(adata: ad.AnnData, cells: bool) -> tuple[np.ndarray, np.ndarray]:
     """Normalize expression and mean-pool cells into collection samples."""
-    ids = prediction_ids(adata)
-    if SAMPLE_ID not in adata.obs:
+    ids = prediction_ids(adata, cells)
+    if not cells:
         return ids, _log_normalize(adata.X, TARGET_SUM)
     samples = adata.obs[SAMPLE_ID].astype(str).to_numpy()
     pooled = [
@@ -63,8 +63,11 @@ def _sample_expression(adata: ad.AnnData) -> tuple[np.ndarray, np.ndarray]:
     return ids, np.asarray(pooled)
 
 
-def embed(adata: ad.AnnData) -> np.ndarray:
+def embed(adata: ad.AnnData, cells: bool) -> np.ndarray:
     """One dataset's expression -> one vector per collection sample. Replace me.
+
+    ``cells`` is true when the rows of ``adata`` are cells, which
+    ``obs["sample_id"]`` maps to collection samples.
 
     ``X`` holds raw counts unless ``adata.uns["input_normalization"]`` names another
     scale (FPKM, microarray intensities or author-normalised counts). The
@@ -73,7 +76,7 @@ def embed(adata: ad.AnnData) -> np.ndarray:
     Whatever you return, the contract is one finite row per id returned by
     ``prediction_ids``. The embedding width may differ between datasets.
     """
-    _, x = _sample_expression(adata)
+    _, x = _sample_expression(adata, cells)
     k = min(N_COMPONENTS, x.shape[0] - 1, x.shape[1])
     return PCA(n_components=k, random_state=RANDOM_STATE).fit_transform(x)
 
@@ -114,8 +117,9 @@ def build(root: Path, modality: str) -> pd.DataFrame:
     for entry in datasets(root / MANIFEST_FILENAME, modality):
         dataset_id = str(entry["id"])
         adata = ad.read_h5ad(root / entry["path"])
-        sample_ids = prediction_ids(adata)
-        vectors = embed(adata)
+        cells = entry.get("observation_level") == "cell"
+        sample_ids = prediction_ids(adata, cells)
+        vectors = embed(adata, cells)
         print(
             f"{dataset_id}: {adata.n_obs} observations, {len(sample_ids)} samples, "
             f"{entry.get('input_normalization', 'raw counts')} "
