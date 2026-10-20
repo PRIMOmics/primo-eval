@@ -145,8 +145,9 @@ pd.concat(blocks).to_parquet("submission.parquet", index=False)
 ```
 
 Replace `embed` with your model: it gets one dataset and returns one row per id, in
-the order of `ids`. For single-cell data, set `MODALITY = "Single Cell RNA"`: the
-baseline then averages the cells of each sample.
+the order of `ids`. For single-cell data, set `MODALITY = "Single Cell RNA"`, and use
+`--modality single-cell-rna` in steps 5 and 6. The baseline then averages the cells
+of each sample.
 
 ### 📊 5. Score the public tasks locally
 
