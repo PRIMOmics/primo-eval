@@ -25,15 +25,11 @@ work/
 ### ⚡ 1. Install uv
 
 We recommend using [uv](https://docs.astral.sh/uv/). It installs Python and the exact
-packages of this repo in one command. Install it with the
-[official installer](https://docs.astral.sh/uv/getting-started/installation/):
+packages of this repo in one command. `primo` supports macOS and Linux. Install uv
+with the [official installer](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
-# macOS and Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 The same page gives other ways, such as `brew install uv`. Open a new terminal, then
