@@ -12,7 +12,12 @@ uv sync
 uv run pytest
 uv run ruff check
 uv run ruff format --check
+uv run --no-project --python 3.13 --with-requirements space/requirements.txt \
+  --with gradio==5.50.0 --with pytest pytest space_tests
 ```
+
+The last command tests the leaderboard Space, in `space/`, with the packages the Space
+runs.
 
 ## Workflow
 

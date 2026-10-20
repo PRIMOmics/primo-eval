@@ -34,6 +34,17 @@ extend-select = ["I"]
 
 [tool.ruff.lint.per-file-ignores]
 ".claude/hooks/*.py" = ["BLE001"]
+"space/*.py" = [
+    "B023",
+    "ISC004",
+    "LOG015",
+    "PYI034",
+    "RUF046",
+    "RUF100",
+    "SIM117",
+    "UP017",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["space"]

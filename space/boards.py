@@ -1,0 +1,351 @@
+"""The slices of PRIMO a visitor can rank models on: registry tasks -> boards.
+
+A *board* is a self-contained leaderboard over a subset of the registry -- every
+task of a modality, of a therapeutic area, or of a task family. Coverage is
+judged INSIDE a board, so a model that covered every Oncology task is ranked
+on the Oncology board even though it skipped Infectious diseases. That is the whole
+point of showing boards as cards: each one is a real, enterable leaderboard, not
+a view filter.
+
+Modality stays the wall for every board. Therapeutic-area and task-category
+boards are named with their modality so every card maps to one unambiguous
+leaderboard and models from different omics layers are never ranked together.
+
+``OPEN_BOARDS`` names the slices PRIMO does NOT cover, so the home page states
+its own gaps instead of implying the registry is the whole territory. They are a
+hand-written constant, not a roadmap: a slice belongs here when a contributor
+could plausibly bring it, and it disappears on its own the day the registry
+covers it.
+
+Modalities and therapeutic areas get open cards; task categories deliberately do
+not. A category is an enum whose members are each pinned to a single metric, so
+naming an open one ("biomarker discovery") would advertise a scoring rule that
+does not exist. Modalities and areas only need a cohort.
+
+Pure functions over registry dicts -- no Gradio, no network, no HTML.
+"""
+
+import re
+from dataclasses import dataclass, replace
+
+from evaluator import _norm_id
+
+METRIC_LABEL = {
+    "auroc": "AUROC",
+    "pearson": "Pearson",
+    "residual_spearman": "Residual Spearman score",
+    "centered_spearman": "Centered Spearman score",
+}
+MODALITY_LABEL = {
+    "bulk RNA": "Bulk RNAseq",
+    "Single Cell RNA": "Single-cell RNAseq",
+    "single-cell RNA": "Single-cell RNAseq",
+}
+BOARD_MODALITY_LABEL = {
+    "bulk RNA": "bulk RNAseq",
+    "Single Cell RNA": "scRNAseq",
+    "single-cell RNA": "scRNAseq",
+}
+
+MODALITY_GROUP = "Per modality"
+AREA_GROUP = "Per therapeutic areas"
+CATEGORY_GROUP = "Task Category"
+OTHER_AREA = "Other"
+PUBLIC = "public"
+
+GROUP_NOTE = {
+    MODALITY_GROUP: "Every task of one omics layer",
+    AREA_GROUP: "Per-indication leaderboards",
+    CATEGORY_GROUP: "Per-question leaderboards",
+}
+
+CODE_LENGTH = 3
+FALLBACK_CODE = "n/a"
+DISPLAY_LABEL = {"perturbation_prediction": "Perturbation response"}
+
+CATEGORY_BLURB = {
+    "treatment_outcome": "Will this patient respond to the drug?",
+    "clinical_scores": "How severe is this patient's disease?",
+    "prognosis": "How will this patient's disease turn out?",
+    "endotype": "Which molecular subtype is this patient?",
+    "perturbation_prediction": "How will treatment change this patient's expression?",
+}
+
+N_FEATURED = 3
+MAX_LISTED = 3
+
+
+def label(value: str) -> str:
+    """``treatment_outcome`` -> ``Treatment outcome``; leaves free text alone."""
+    return DISPLAY_LABEL.get(value, value.replace("_", " ").capitalize())
+
+
+def metric_label(metric: str) -> str:
+    return METRIC_LABEL.get(metric, metric)
+
+
+def modality_label(modality: str) -> str:
+    """Return the visitor-facing label for a stored modality identifier."""
+    return MODALITY_LABEL.get(modality, modality)
+
+
+def short_code(name: str) -> str:
+    """The board's letter tag, standing in for what used to be a per-board emoji.
+
+    Derived from the name rather than looked up, because a lookup table is what
+    breaks: spatial transcriptomics or metabolomics would land on a shrug the day
+    somebody adds them. Colour carries the group; these letters only carry the
+    board.
+    """
+    letters = re.sub(r"[^a-z]", "", name.lower())
+    return letters[:CODE_LENGTH].upper() or FALLBACK_CODE
+
+
+def slugify(*parts: str) -> str:
+    """URL-safe key for a board, stable enough to paste into a link."""
+    joined = "-".join(str(p) for p in parts)
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", joined.lower())).strip("-")
+
+
+def distinct(tasks, key: str) -> list[str]:
+    """Distinct non-empty values of ``key`` across registry tasks, case-insensitive."""
+    return sorted({str(t[key]) for t in tasks if t.get(key)}, key=str.lower)
+
+
+def distinct_listed(tasks, key: str) -> list[str]:
+    """Distinct values of a list-valued ``key`` (a cohort can span several diseases)."""
+    values: set[str] = set()
+    for task in tasks:
+        values.update(str(value) for value in task.get(key) or [])
+    return sorted(values, key=str.lower)
+
+
+@dataclass(frozen=True)
+class Board:
+    """One enterable leaderboard: a named task set plus the numbers on its card."""
+
+    slug: str
+    group: str
+    name: str
+    code: str
+    blurb: str
+    modality: str
+    task_ids: frozenset[str]
+    n_cohorts: int
+    n_patients: int
+    n_diseases: int
+
+    @property
+    def n_tasks(self) -> int:
+        return len(self.task_ids)
+
+
+def board_label(board: Board) -> str:
+    """Name a scoped board with the modality that defines its leaderboard."""
+    if board.group == MODALITY_GROUP:
+        return board.name
+    modality = BOARD_MODALITY_LABEL.get(board.modality, modality_label(board.modality))
+    return f"{board.name} - {modality}"
+
+
+def _join(values: list[str]) -> str:
+    """``a, b and c``, truncated -- card blurbs must not wrap forever.
+
+    A truncated list drops the "and": ``a, b and c…`` reads as an ellipsis stuck
+    to ``c``, where ``a, b, c…`` reads as the list continuing.
+    """
+    shown = values[:MAX_LISTED]
+    if not shown:
+        return "n/a"
+    if len(values) > MAX_LISTED:
+        return f"{', '.join(shown)}…"
+    if len(shown) == 1:
+        return shown[0]
+    return f"{', '.join(shown[:-1])} and {shown[-1]}"
+
+
+def _cohort_stats(tasks: list[dict]) -> tuple[int, int, int]:
+    """Cohorts, patients and diseases behind a task set.
+
+    Counted per COHORT, not per task and not per dataset. Three clinical scores
+    read off the same biopsies are one cohort, and so are the two treatment arms
+    and the transfer split cut from one anti-TNF trial -- summing datasets would
+    advertise those patients twice. Entries on one cohort can differ in
+    ``n_samples`` (labels get dropped, an arm is a subset), so the widest one
+    stands for it.
+
+    A registry written before ``cohort_id`` existed falls back to ``dataset_id``,
+    which is the old behaviour rather than a crash.
+    """
+    patients_by_cohort: dict[str, int] = {}
+    diseases: set[str] = set()
+    for task in tasks:
+        cohort = str(task.get("cohort_id") or _norm_id(task.get("dataset_id", "")))
+        n_subjects = int(task.get("n_subjects") or task.get("n_samples") or 0)
+        patients_by_cohort[cohort] = max(patients_by_cohort.get(cohort, 0), n_subjects)
+        diseases.update(str(d) for d in task.get("diseases") or [])
+    return (
+        len(patients_by_cohort),
+        sum(patients_by_cohort.values()),
+        len(diseases),
+    )
+
+
+def _blurb(group: str, name: str, tasks: list[dict]) -> str:
+    if group == MODALITY_GROUP:
+        display = modality_label(name)
+        return f"Every PRIMO task, scored from {display[:1].lower()}{display[1:]} profiles."
+    if group == CATEGORY_GROUP:
+        return CATEGORY_BLURB.get(name, label(name))
+    families = [label(c) for c in distinct(tasks, "category")]
+    return f"{_join(families)} across {_join(distinct_listed(tasks, 'diseases'))}."
+
+
+def _board(group: str, name: str, modality: str, tasks: list[dict]) -> Board:
+    """Build one board from a task slice."""
+    n_cohorts, n_patients, n_diseases = _cohort_stats(tasks)
+    display = modality_label(name) if group == MODALITY_GROUP else label(name)
+    return Board(
+        slug=slugify(modality) if group == MODALITY_GROUP else slugify(name, modality),
+        group=group,
+        name=display,
+        code=short_code(display),
+        blurb=_blurb(group, name, tasks),
+        modality=modality,
+        task_ids=frozenset(_norm_id(t["task_id"]) for t in tasks),
+        n_cohorts=n_cohorts,
+        n_patients=n_patients,
+        n_diseases=n_diseases,
+    )
+
+
+def without_public(board: Board, by_id: dict[str, dict]) -> Board:
+    """The same board restricted to its private tasks, card numbers recounted.
+
+    Parameters
+    ----------
+    board : Board
+        Board built from ``by_id``.
+    by_id : dict[str, dict]
+        Task registry keyed by task id, public tasks flagged.
+
+    Returns
+    -------
+    Board
+        The board with the same slug and name; its task set may be empty.
+    """
+    private = frozenset(t for t in board.task_ids if not by_id[t].get(PUBLIC))
+    n_cohorts, n_patients, n_diseases = _cohort_stats([by_id[t] for t in private])
+    return replace(
+        board,
+        task_ids=private,
+        n_cohorts=n_cohorts,
+        n_patients=n_patients,
+        n_diseases=n_diseases,
+    )
+
+
+def build_boards(by_id: dict[str, dict]) -> list[Board]:
+    """Every board the registry supports, modality boards first.
+
+    A facet value that yields no task simply yields no card, so a registry
+    written before therapeutic areas existed degrades to modality boards only
+    instead of breaking the page.
+
+    The "Other" area gets no board: it mixes unrelated diseases, so its ranking
+    would mean nothing. Its tasks are still ranked on the modality and category
+    boards.
+    """
+    boards: list[Board] = []
+    for modality in distinct(by_id.values(), "modality"):
+        within = [t for t in by_id.values() if str(t.get("modality")) == modality]
+        boards.append(_board(MODALITY_GROUP, modality, modality, within))
+        for area in distinct(within, "therapeutic_area"):
+            if area == OTHER_AREA:
+                continue
+            tasks = [t for t in within if str(t.get("therapeutic_area")) == area]
+            boards.append(_board(AREA_GROUP, area, modality, tasks))
+        for category in distinct(within, "category"):
+            tasks = [t for t in within if str(t.get("category")) == category]
+            boards.append(_board(CATEGORY_GROUP, category, modality, tasks))
+    return boards
+
+
+@dataclass(frozen=True)
+class OpenBoard:
+    """A slice nobody can be ranked on yet: a stated gap, not a leaderboard.
+
+    Deliberately not a ``Board``: it has no tasks, no cohorts and no patients, and
+    zeroing those fields would print "0 patients" on a card whose whole job is to
+    read as an invitation.
+    """
+
+    group: str
+    name: str
+    blurb: str
+
+
+OPEN_BOARDS: tuple[OpenBoard, ...] = (
+    OpenBoard(
+        MODALITY_GROUP,
+        "Single-cell RNAseq",
+        "Dissociated tissue, labelled at the patient level. No cohort yet.",
+    ),
+    OpenBoard(
+        MODALITY_GROUP,
+        "Proteomics",
+        "Plasma or tissue proteins paired with clinical follow-up. No cohort yet.",
+    ),
+    OpenBoard(
+        MODALITY_GROUP,
+        "Spatial transcriptomics",
+        "Expression kept in place in the tissue, with patient outcomes. No cohort yet.",
+    ),
+    OpenBoard(
+        AREA_GROUP,
+        "Neuroscience",
+        "Neurodegenerative cohorts, such as Alzheimer's or Parkinson's. No cohort yet.",
+    ),
+    OpenBoard(
+        AREA_GROUP,
+        "Cardiovascular",
+        "Heart or vessel disease with outcomes or treatment response. No cohort yet.",
+    ),
+)
+
+
+def in_group(boards: list[Board], group: str) -> list[Board]:
+    """Cards of one section, biggest first -- the fullest board reads as the headline."""
+    return sorted(
+        (b for b in boards if b.group == group), key=lambda b: (-b.n_tasks, b.name)
+    )
+
+
+def open_in_group(boards: list[Board], group: str) -> list[OpenBoard]:
+    """Open cards of one section, minus any slice the registry has since covered.
+
+    The day a single-cell cohort lands, its board is built from the registry and
+    the matching open card drops out with no edit here.
+    """
+    covered = {board.name.lower() for board in in_group(boards, group)}
+    return [
+        board
+        for board in OPEN_BOARDS
+        if board.group == group and board.name.lower() not in covered
+    ]
+
+
+def featured(boards: list[Board]) -> list[Board]:
+    """The hero row: every modality board, topped up with the largest others."""
+    heroes = in_group(boards, MODALITY_GROUP)
+    rest = [b for b in boards if b.group != MODALITY_GROUP]
+    rest.sort(key=lambda b: (-b.n_tasks, b.name))
+    return (heroes + rest)[:N_FEATURED]
+
+
+def by_slug(boards: list[Board], slug: str | None) -> Board | None:
+    """Resolve a ``?board=`` query param; unknown or missing falls back to the hero."""
+    for board in boards:
+        if board.slug == slug:
+            return board
+    return featured(boards)[0] if boards else None

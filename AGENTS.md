@@ -10,7 +10,12 @@ uv sync
 uv run pytest
 uv run ruff check --fix
 uv run ruff format
+uv run --no-project --python 3.13 --with-requirements space/requirements.txt \
+  --with gradio==5.50.0 --with pytest pytest space_tests
 ```
+
+The last command runs the Space tests with the packages of the Space: the Python
+and Gradio versions of `space/README.md`, and `space/requirements.txt`.
 
 ## Layout
 
@@ -28,10 +33,15 @@ uv run ruff format
 - `src/primomics/errors.py`: `SubmissionError` (the submitter fixes it) and
   `EvaluatorError` (we fix it).
 - `tests/`: one test file per module.
+- `space/`: the leaderboard Space, as it runs on Hugging Face. `space/README.md` holds
+  its config. It still has its own scorer, `space/evaluator.py`.
+- `space_tests/`: the Space tests, one file per Space module.
 
 ## Rules
 
 - A score must never change by accident. Some tests check exact reference scores: if
   one fails, find the cause before you change the test.
 - Do not add code comments.
+- `space/` imports only its own modules and the packages of `space/requirements.txt`,
+  so Hugging Face can build it as is.
 - A hook runs `ruff format` and `ruff check --fix` when you finish.
