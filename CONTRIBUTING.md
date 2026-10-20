@@ -13,7 +13,8 @@ uv run pytest
 uv run ruff check
 uv run ruff format --check
 uv run --isolated --no-project --python 3.13 \
-  --with-requirements space/requirements.txt --with gradio==5.50.0 --with pytest \
+  --with-requirements space/requirements.txt \
+  --with "gradio[oauth]==5.50.0" --with pytest \
   pytest space_tests
 ```
 

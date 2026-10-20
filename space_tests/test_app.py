@@ -1,7 +1,10 @@
 """Unit tests for submission feedback in the PRIMO app."""
 
 import importlib
+import os
+import subprocess
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
@@ -248,3 +251,21 @@ def test_hvg_tag_is_reserved(monkeypatch):
 
     assert persisted == []
     assert "is reserved" in summary
+
+
+def test_the_interface_builds_as_on_the_space():
+    """Outside a Space, the Gradio login needs a local token, so the env fakes a Space."""
+    space_env = {
+        "SYSTEM": "spaces",
+        "SPACE_ID": "owner/space",
+        "OAUTH_CLIENT_ID": "client-id",
+        "OAUTH_CLIENT_SECRET": "client-secret",
+        "OAUTH_SCOPES": "openid profile",
+        "OPENID_PROVIDER_URL": "https://huggingface.co",
+    }
+    subprocess.run(
+        [sys.executable, "-c", "import app; app.build_demo()"],
+        cwd=Path(app.__file__).parent,
+        env={**os.environ, **space_env},
+        check=True,
+    )

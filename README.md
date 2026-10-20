@@ -223,7 +223,8 @@ with the packages of the Space:
 
 ```bash
 uv run --isolated --no-project --python 3.13 \
-  --with-requirements space/requirements.txt --with gradio==5.50.0 --with pytest \
+  --with-requirements space/requirements.txt \
+  --with "gradio[oauth]==5.50.0" --with pytest \
   pytest space_tests
 ```
 

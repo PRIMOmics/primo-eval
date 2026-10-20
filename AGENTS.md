@@ -11,12 +11,14 @@ uv run pytest
 uv run ruff check --fix
 uv run ruff format
 uv run --isolated --no-project --python 3.13 \
-  --with-requirements space/requirements.txt --with gradio==5.50.0 --with pytest \
+  --with-requirements space/requirements.txt \
+  --with "gradio[oauth]==5.50.0" --with pytest \
   pytest space_tests
 ```
 
 The last command runs the Space tests with the packages of the Space: the Python
-and Gradio versions of `space/README.md`, and `space/requirements.txt`.
+and Gradio versions of `space/README.md`, and `space/requirements.txt`. Gradio
+comes with its `oauth` extra, which the login button of the Space needs.
 
 ## Layout
 
