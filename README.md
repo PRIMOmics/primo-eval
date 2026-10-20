@@ -10,13 +10,22 @@ package is `primomics`.
 
 ## 🚀 From install to the leaderboard
 
-⚡ Install uv → 🐍 create a venv → 📦 install `primomics` → 📥 download the data →
-🧠 embed it → 📊 score it locally → 🏆 submit it.
+⚡ Install uv → 📦 clone and install `primo` → 📥 download the data → 🧠 embed it →
+📊 score it locally → 🏆 submit it.
+
+You work in two folders, side by side. The clone of this repo runs `primo`, in its
+own environment. Your repo runs your model, in your environment:
+
+```text
+work/
+├── primo-eval/   this repo: download, score and submit
+└── my-model/     your repo: embed the data with your model
+```
 
 ### ⚡ 1. Install uv
 
-[uv](https://docs.astral.sh/uv/) installs Python, creates virtual environments and
-installs packages. Install it with the
+We recommend using [uv](https://docs.astral.sh/uv/). It installs Python and the exact
+packages of this repo in one command. Install it with the
 [official installer](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
@@ -34,47 +43,31 @@ check that uv works:
 uv --version
 ```
 
-### 🐍 2. Create a virtual environment
-
-Make a folder for your work, with a virtual environment in it:
+### 📦 2. Clone and install primo
 
 ```bash
-mkdir my-primo && cd my-primo
-uv venv --python 3.12
-source .venv/bin/activate  # on Windows: .venv\Scripts\activate
+git clone https://github.com/PRIMOmics/primo-eval
+cd primo-eval
+uv sync
+uv run primo --help
 ```
 
-`uv venv` creates the `.venv` folder. If Python 3.12 is not on your computer, uv
-downloads it. Activate the environment again in each new terminal.
-
-### 📦 3. Install primomics
-
-```bash
-uv pip install "git+https://github.com/PRIMOmics/primo-eval"
-primo --help
-```
-
-This adds two commands: `primo`, and `hf`, the Hugging Face command line.
-
-> [!TIP]
-> No uv? In any environment with Python 3.12 or later,
-> `pip install "git+https://github.com/PRIMOmics/primo-eval"` works too.
+`uv sync` creates the `.venv` folder, with Python 3.12 and the exact packages of
+`uv.lock`. If Python 3.12 is not on your computer, uv downloads it. `uv run` runs a
+command in this environment, so you never need to activate it. Run every `primo`
+command from this folder.
 
 > [!NOTE]
-> This installs the latest code of `main`, where scores can change. For stable
-> scores, install a [release](https://github.com/PRIMOmics/primo-eval/releases)
-> instead, with its tag:
->
-> ```bash
-> uv pip install "git+https://github.com/PRIMOmics/primo-eval@<tag>"
-> ```
+> `main` can change scores. For stable scores, use a
+> [release](https://github.com/PRIMOmics/primo-eval/releases): run
+> `git checkout <tag>` before `uv sync`.
 
-### 📥 4. Download the data
+### 📥 3. Download the data
 
 Download the datasets of one modality, `bulk-rna` or `single-cell-rna`:
 
 ```bash
-primo download --modality bulk-rna
+uv run primo download --modality bulk-rna
 ```
 
 The data comes from the
@@ -90,14 +83,14 @@ fetches the latest commit, into `primo-data/` by default (`--data-dir` changes i
 Use `--public-only` for the datasets that carry a public task, or `--datasets` for a
 comma-separated list of ids. Run the command again to get the latest data.
 
-### 🧠 5. Embed the datasets
+### 🧠 4. Embed the datasets
 
-Embed each dataset with your model, and write all the embeddings of one modality to
-**one** file. The file has one row per sample: a `dataset_id` column, a `sample_id`
-column, then one numeric column per embedding dimension (`.parquet`, `.csv` or
-`.tsv`). A `.npz` file holds three arrays instead: `dataset_ids`, `sample_ids` and
-`embeddings`. Each dataset can have its own number of dimensions: leave the extra
-columns empty.
+Embed the data in your own repo, with your model and your environment. Write all
+the embeddings of one modality to **one** file. The file has one row per sample: a
+`dataset_id` column, a `sample_id` column, then one numeric column per embedding
+dimension (`.parquet`, `.csv` or `.tsv`). A `.npz` file holds three arrays instead:
+`dataset_ids`, `sample_ids` and `embeddings`. Each dataset can have its own number of
+dimensions: leave the extra columns empty.
 
 In bulk datasets, each row of `expression.h5ad` is a sample. In single-cell datasets,
 the rows are cells, and `obs["sample_id"]` gives their sample: submit one embedding
@@ -107,8 +100,8 @@ per sample. `X` holds raw counts, unless the `input_normalization` of the datase
 This example embeds every downloaded bulk dataset with a simple baseline:
 log2(CPM + 1), then PCA. It is adapted from the
 [`quickstart.py`](https://huggingface.co/spaces/PRIMOmics/primo-eval/blob/main/quickstart.py)
-of the leaderboard Space, and it uses only packages that `primomics` installs. Save
-it as `embed.py`, then run `python embed.py`:
+of the leaderboard Space. In your environment, it needs anndata, pandas, pyarrow,
+pyyaml and scikit-learn. Save it as `embed.py` in your repo, then run it from there:
 
 ```python
 from pathlib import Path
@@ -119,7 +112,7 @@ import pandas as pd
 import yaml
 from sklearn.decomposition import PCA
 
-DATA_DIR = Path("primo-data")
+DATA_DIR = Path("../primo-eval/primo-data")
 MODALITY = "bulk RNA"
 
 
@@ -159,10 +152,13 @@ Replace `embed` with your model: it gets one dataset and returns one row per id,
 the order of `ids`. For single-cell data, set `MODALITY = "Single Cell RNA"`: the
 baseline then averages the cells of each sample.
 
-### 📊 6. Score the public tasks locally
+### 📊 5. Score the public tasks locally
+
+From the clone:
 
 ```bash
-primo evaluate submission.parquet --modality bulk-rna -o results.json
+uv run primo evaluate ../my-model/submission.parquet --modality bulk-rna \
+  -o ../my-model/results.json
 ```
 
 `primo evaluate` checks every dataset of the file against the downloaded data: each
@@ -177,26 +173,27 @@ This step is optional, and it needs no account. It finds the errors in your file
 before you submit: when a check fails, the command says what to fix and exits with
 code 1.
 
-### 🏆 7. Submit to the leaderboard
+### 🏆 6. Submit to the leaderboard
 
 #### 💻 From the command line
 
 Log in to Hugging Face once, with an access token from your
 [settings](https://huggingface.co/settings/tokens). On a server, you can set the
-`HF_TOKEN` environment variable instead. Then check the file, and send it:
+`HF_TOKEN` environment variable instead. Then, from the clone, check the file and
+send it:
 
 ```bash
-hf auth login
-primo submit submission.parquet --modality bulk-rna \
+uv run hf auth login
+uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
   --model-name my-model --email me@lab.org --dry-run
-primo submit submission.parquet --modality bulk-rna \
+uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
   --model-name my-model --email me@lab.org
 ```
 
 `primo submit` runs the checks of `primo evaluate`, and checks that each dataset of
 the file is still the latest one on the Hub. If a dataset changed, run
-`primo download` again, then embed that dataset again. `--dry-run` runs every check
-and sends nothing. Without it, the command sends the file to the
+`uv run primo download` again, then embed that dataset again. `--dry-run` runs every
+check and sends nothing. Without it, the command sends the file to the
 [leaderboard Space](https://huggingface.co/spaces/PRIMOmics/primo-eval), which scores
 every task, the private ones included, and publishes the scores. Scoring takes a few
 minutes. The Space reads your Hugging Face token only to know who submits: a model
@@ -216,21 +213,13 @@ same name, and the `+ HVG` entry that comes with each submission.
 
 ## 🛠️ Development
 
-Clone the repo, then install it with uv (see step 1):
+In the clone (step 2), run the same checks as the CI:
 
 ```bash
-git clone https://github.com/PRIMOmics/primo-eval
-cd primo-eval
-uv sync
-uv run primo --help
 uv run pytest
 uv run ruff check
 uv run ruff format --check
 ```
-
-`uv sync` creates `.venv` from `uv.lock`, with Python 3.12, the package in editable
-mode and the dev tools. `uv run` runs a command in this environment, with no need to
-activate it.
 
 Before you open a pull request, read `CONTRIBUTING.md`.
 
