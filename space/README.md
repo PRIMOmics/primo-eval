@@ -237,7 +237,8 @@ The rest of the org name is spelled out and has to be changed by hand:
 - the links in this file, including the YAML `thumbnail:` above, and in
   `pages/*.md`
 - outside this folder: `DATA_REPO` in `src/primomics/data.py`, `SPACE` in
-  `src/primomics/submit.py`, and the links of the top-level `README.md`
+  `src/primomics/submit.py`, the links of the top-level `README.md`, and
+  the deploy command in `CONTRIBUTING.md`
 
 The theme follows the PRIMO charter: Funnel Display for headings, Funnel Sans for
 everything else, Scienta Navy `#080F5F` / PRIMO Cyan `#16B3C0` on Paper
