@@ -163,7 +163,8 @@ export HF_TOKEN=...   # read access to the PRIMO datasets
 python evaluator.py --modality bulk-rna --submission my_embeddings.parquet
 ```
 
-Long local runs can be resumed task by task with `--checkpoint-dir PATH`.
+It reads the data commits of the current board version (see "Board versions"
+below). Long local runs can be resumed task by task with `--checkpoint-dir PATH`.
 Checkpoints are namespaced by the submission contents, representation,
 reference features and scoring configuration, and are invalidated when private
 task inputs change.
@@ -194,6 +195,20 @@ owner, credits and `submission_id`. The features are kept privately at
 `baselines/HVG-1200-genes/submission.parquet` in `PRIMOmics/primo-results`.
 When the reference changes, the `+ HVG` entry of every live archived submission
 is scored again, so each one follows the current reference.
+
+## Board versions
+
+A board version is a minor release of primo-eval: version `0.1` is scored by the
+`v0.1.x` releases. `versions.yaml` lists every version with its release tag, the
+day it opened, and the Hub commits its scores read: `data` in `PRIMOmics/primo`,
+`labels` in `PRIMOmics/primo-labels`, and `reference`, the commit of
+`PRIMOmics/primo-results` that holds the HVG features. `current` is the version
+this code scores.
+
+The scorer reads these commits, not the latest ones, so a push to a data repo
+changes no score until a release opens a new version. `requirements.txt` pins the
+packages that can move a score (numpy, pandas, joblib, scikit-learn, scipy) to the
+versions the Space runs.
 
 ## Space configuration
 

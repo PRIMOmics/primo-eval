@@ -16,9 +16,11 @@ is never silently charged against the submitter.
 
 Reads the public ``datasets.yaml`` manifest (what the submitter embeds) plus the
 private ``tasks.yaml`` registry, each task's private ``labels.csv``, and hidden
-perturbation ``targets.npz`` matrices where applicable. It imports only
-``scoring.py`` and the packages of ``requirements.txt``, so it runs unchanged
-inside a public Hugging Face Space.
+perturbation ``targets.npz`` matrices where applicable. Each read is at the commit
+that ``versions.py`` pins for the current board version, unless a caller passes
+another ``revision``. It imports only ``scoring.py``, ``versions.py`` and the
+packages of ``requirements.txt``, so it runs unchanged inside a public Hugging Face
+Space.
 
 Deps: numpy, pandas, joblib, scikit-learn, pyyaml. ``huggingface_hub`` is used
 only by the fetch helpers / CLI, imported lazily.
@@ -50,6 +52,7 @@ from scoring import (
 from sklearn.linear_model import LogisticRegressionCV, Ridge
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
+from versions import CURRENT
 
 SAMPLE_ID = "sample_id"
 SUBJECT_ID = "subject_id"
@@ -1313,12 +1316,18 @@ def score_task(
     )
 
 
-def fetch_manifest(token: str | None = None) -> list[dict]:
+def fetch_manifest(
+    token: str | None = None, revision: str = CURRENT.data
+) -> list[dict]:
     """Download the public ``datasets.yaml`` registry of opaque dataset ids."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(
-        PUBLIC_REPO, MANIFEST_FILENAME, repo_type="dataset", token=token
+        PUBLIC_REPO,
+        MANIFEST_FILENAME,
+        repo_type="dataset",
+        token=token,
+        revision=revision,
     )
     with open(path) as handle:
         data = yaml.safe_load(handle)
@@ -1333,7 +1342,9 @@ def public_task_ids_from_manifest(path: str | Path) -> set[str]:
         return {_norm_id(entry[TASK_ID]) for entry in yaml.safe_load(handle)["tasks"]}
 
 
-def fetch_public_task_ids(token: str | None = None) -> set[str]:
+def fetch_public_task_ids(
+    token: str | None = None, revision: str = CURRENT.data
+) -> set[str]:
     """Download the public task ids; none until published or if the fetch fails.
 
     Losing the Public tags beats blanking every page over a Hub hiccup.
@@ -1343,7 +1354,11 @@ def fetch_public_task_ids(token: str | None = None) -> set[str]:
 
     try:
         path = hf_hub_download(
-            PUBLIC_REPO, PUBLIC_TASKS_MANIFEST, repo_type="dataset", token=token
+            PUBLIC_REPO,
+            PUBLIC_TASKS_MANIFEST,
+            repo_type="dataset",
+            token=token,
+            revision=revision,
         )
         return public_task_ids_from_manifest(path)
     except EntryNotFoundError:
@@ -1380,32 +1395,46 @@ def scoreable_tasks(tasks: list[dict], valid_ids: set[str]) -> list[dict]:
     return kept
 
 
-def fetch_tasks_registry(token: str | None = None) -> list[dict]:
+def fetch_tasks_registry(
+    token: str | None = None, revision: str = CURRENT.labels
+) -> list[dict]:
     """Download the private ``tasks.yaml`` registry from the labels repo."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(
-        LABELS_REPO, TASKS_FILENAME, repo_type="dataset", token=token
+        LABELS_REPO, TASKS_FILENAME, repo_type="dataset", token=token, revision=revision
     )
     return load_tasks_registry(path)
 
 
-def fetch_task_labels(task_id: str, token: str | None = None) -> pd.DataFrame:
+def fetch_task_labels(
+    task_id: str, token: str | None = None, revision: str = CURRENT.labels
+) -> pd.DataFrame:
     """Download a task's private ``labels.csv`` from the labels repo."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(
-        LABELS_REPO, f"{task_id}/{LABELS_FILENAME}", repo_type="dataset", token=token
+        LABELS_REPO,
+        f"{task_id}/{LABELS_FILENAME}",
+        repo_type="dataset",
+        token=token,
+        revision=revision,
     )
     return load_labels(path)
 
 
-def fetch_task_targets(task_id: str, token: str | None = None) -> PerturbationTargets:
+def fetch_task_targets(
+    task_id: str, token: str | None = None, revision: str = CURRENT.labels
+) -> PerturbationTargets:
     """Download a task's private compressed response matrix."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(
-        LABELS_REPO, f"{task_id}/{TARGETS_FILENAME}", repo_type="dataset", token=token
+        LABELS_REPO,
+        f"{task_id}/{TARGETS_FILENAME}",
+        repo_type="dataset",
+        token=token,
+        revision=revision,
     )
     return load_targets(path)
 
