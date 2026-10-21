@@ -11,6 +11,7 @@ import pytest
 from huggingface_hub.utils import EntryNotFoundError
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import roc_auc_score
+from versions import CURRENT
 
 
 def test_all_repos_live_under_the_primo_org():
@@ -1379,3 +1380,43 @@ def test_no_task_is_public_when_the_manifest_is_missing_or_unreachable(
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fail)
     assert ev.fetch_public_task_ids() == set()
+
+
+def _record_revisions(monkeypatch) -> list[tuple[str, str]]:
+    calls = []
+
+    def record(repo_id, filename, **kwargs):
+        calls.append((repo_id, kwargs["revision"]))
+        raise LookupError(filename)
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", record)
+    return calls
+
+
+def test_the_fetchers_read_the_commits_of_the_current_version(monkeypatch):
+    calls = _record_revisions(monkeypatch)
+
+    for fetch in (ev.fetch_manifest, ev.fetch_tasks_registry):
+        with pytest.raises(LookupError):
+            fetch()
+    for fetch in (ev.fetch_task_labels, ev.fetch_task_targets):
+        with pytest.raises(LookupError):
+            fetch("t901")
+    ev.fetch_public_task_ids()
+
+    assert calls == [
+        (ev.PUBLIC_REPO, CURRENT.data),
+        (ev.LABELS_REPO, CURRENT.labels),
+        (ev.LABELS_REPO, CURRENT.labels),
+        (ev.LABELS_REPO, CURRENT.labels),
+        (ev.PUBLIC_REPO, CURRENT.data),
+    ]
+
+
+def test_a_fetcher_reads_the_commit_it_is_given(monkeypatch):
+    calls = _record_revisions(monkeypatch)
+
+    with pytest.raises(LookupError):
+        ev.fetch_tasks_registry(revision="c" * 40)
+
+    assert calls == [(ev.LABELS_REPO, "c" * 40)]

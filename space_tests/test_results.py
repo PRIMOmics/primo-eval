@@ -1,5 +1,8 @@
 """Unit tests for the results schema (no network, no Gradio)."""
 
+from pathlib import Path
+
+import huggingface_hub
 import numpy as np
 import pandas as pd
 import pytest
@@ -14,6 +17,7 @@ from results import (
     SUBMISSION_ID,
     _embedding_manifest,
     display_name,
+    fetch_hvg_reference,
     owner_of,
     with_author_submission_flag,
     with_baseline_flag,
@@ -23,6 +27,7 @@ from results import (
     with_submission_id,
     without_hvg,
 )
+from versions import CURRENT
 
 
 def _frame(**columns) -> pd.DataFrame:
@@ -177,3 +182,16 @@ def test_without_hvg_drops_only_hvg_entries():
     )
     assert list(without_hvg(df)["model_name"]) == ["m", "HVG-1200-genes", "m + HVG v2"]
     assert without_hvg(pd.DataFrame(columns=RESULT_COLUMNS)).empty
+
+
+def test_the_hvg_reference_is_read_at_the_commit_of_the_current_version(monkeypatch):
+    calls = []
+
+    def download(repo_id, filename, **kwargs):
+        calls.append(kwargs["revision"])
+        return "hvg.parquet"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+
+    assert fetch_hvg_reference(None) == Path("hvg.parquet")
+    assert calls == [CURRENT.reference]

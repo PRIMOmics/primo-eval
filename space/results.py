@@ -25,7 +25,8 @@ Every submission is also scored concatenated with our ``HVG-1200-genes``
 baseline features and stored as a second entry, ``<model> + HVG``, sharing the
 parent's owner, credits and submission id. It shows what a model adds on top of
 plain expression. The features live privately at ``HVG_REFERENCE_FILE``, next
-to the results, so they always match the published anchor.
+to the results. They are read at the commit the board version pins, so a new
+upload is used only once a release pins it.
 """
 
 import hashlib
@@ -35,6 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 from evaluator import RESULTS_REPO, load_submission
+from versions import CURRENT
 
 RESULTS_FILE = "task_results.csv"
 SUBMISSIONS_FILE = "submissions.csv"
@@ -174,13 +176,17 @@ def without_hvg(df: pd.DataFrame) -> pd.DataFrame:
     return df[~df[MODEL_NAME].astype(str).str.endswith(f" {HVG_TAG}")]
 
 
-def fetch_hvg_reference(token: str | None) -> Path:
+def fetch_hvg_reference(token: str | None, revision: str = CURRENT.reference) -> Path:
     """Local path to the HVG-1200 features every submission is concatenated with."""
     from huggingface_hub import hf_hub_download
 
     return Path(
         hf_hub_download(
-            RESULTS_REPO, HVG_REFERENCE_FILE, repo_type="dataset", token=token
+            RESULTS_REPO,
+            HVG_REFERENCE_FILE,
+            repo_type="dataset",
+            token=token,
+            revision=revision,
         )
     )
 
