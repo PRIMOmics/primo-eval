@@ -6,7 +6,6 @@ do I enter?"), Contribute ("what is missing, and how do I add it?"), Method
 ("can I trust this?"). Every page is addressable -- ``?board=<slug>`` opens a
 board and ``?tab=contribute`` opens a tab -- which is what the rail links and the
 open cards use. The tab strip is hidden in CSS; the rail is the navigation.
-``&view=private`` leaves the public tasks out of the boards and the Tasks page.
 
 Choose one modality and upload its embedding file (rows keyed by ``dataset_id``
 + ``sample_id``); a fixed task probe scores each task (a dataset may carry
@@ -62,8 +61,6 @@ from evaluator import (
 )
 from leaderboard import RESERVED_COLUMNS, source_repositories
 from render import (
-    PRIVATE_VIEW,
-    VIEW_PARAM,
     evaluation_confirmation,
     evaluation_status,
     rail_html,
@@ -329,10 +326,10 @@ def _score_with_hvg(submission_path: str, modality: str) -> dict | None:
         return None
 
 
-def _rendered_board(slug: str | None, private: bool) -> str:
+def _rendered_board(slug: str | None) -> str:
     """The Board page for ``slug`` -- re-rendered after a submission saves."""
     by_id, boards, df = _page_state()
-    return render_board(by_slug(boards, slug), df, by_id, private)
+    return render_board(by_slug(boards, slug), df, by_id)
 
 
 def evaluate(
@@ -346,11 +343,10 @@ def evaluate(
     hf_model_link: str,
     notes: str,
     slug: str | None,
-    private: bool,
     profile: gr.OAuthProfile | None,
 ):
     def _refuse(message: str):
-        return message, _rendered_board(slug, private)
+        return message, _rendered_board(slug)
 
     if profile is None:
         return _refuse("Please sign in with Hugging Face to submit.")
@@ -418,7 +414,7 @@ def evaluate(
             "\n\n⚠️ No valid scores were produced, so the model was not added to "
             "any board."
         )
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
 
     hvg_result = _score_with_hvg(submission_path, modality)
     hvg_rows = (
@@ -454,13 +450,13 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ scored, but the embedding archive was not saved: {error}"
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
     try:
         append_results(rows, TOKEN)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ archived, but the leaderboard was not saved: {error}"
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
 
     summary += f"\n\n✅ **{model} is now shown on the relevant boards.**"
     if hvg_rows:
@@ -470,7 +466,7 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ Contact metadata was not saved: {error}"
-    return summary, _rendered_board(slug, private)
+    return summary, _rendered_board(slug)
 
 
 def _landing_tab(params: dict, has_board: bool) -> str:
@@ -498,27 +494,25 @@ def _init(request: gr.Request):
     selected = _landing_tab(params, bool(params.get("board") and board))
     active_slug = board.slug if selected == "board" and board else None
     active_tab = selected if selected in FOOT_TABS else None
-    private = params.get(VIEW_PARAM) == PRIVATE_VIEW
     return (
         gr.Tabs(selected=selected),
-        rail_html(boards, by_id, active_slug, active_tab, private),
+        rail_html(boards, active_slug, active_tab),
         board.slug if board else None,
-        private,
         state,
-        render_tasks(by_id, private),
+        render_tasks(by_id),
         _about_text(by_id),
-        render_board(board, df, by_id, private),
+        render_board(board, df, by_id),
     )
 
 
-def _render_overview(state: PageState, private: bool) -> tuple[str, None]:
+def _render_overview(state: PageState) -> tuple[str, None]:
     """The Boards page, rendered after ``_init``.
 
     It rates every board, so it is the slowest page and must not hold back the
     one a visitor landed on. The state is then released, as nothing reads it again.
     """
     by_id, boards, df = state
-    return render_boards(boards, df, by_id, private), None
+    return render_boards(boards, df, by_id), None
 
 
 def build_demo() -> gr.Blocks:
@@ -531,7 +525,6 @@ def build_demo() -> gr.Blocks:
         fill_width=True,
     ) as demo:
         active_board = gr.State(None)
-        private_view = gr.State(False)
         page_state = gr.State(None)
         with gr.Row(elem_id="pm-shell"):
             with gr.Column(elem_id="pm-rail"):
@@ -634,7 +627,6 @@ def build_demo() -> gr.Blocks:
                 hf_tb,
                 notes_tb,
                 active_board,
-                private_view,
             ],
             [result_md, board_html],
         )
@@ -648,19 +640,8 @@ def build_demo() -> gr.Blocks:
         demo.load(
             _init,
             None,
-            [
-                pages,
-                rail,
-                active_board,
-                private_view,
-                page_state,
-                tasks_html,
-                about_md,
-                board_html,
-            ],
-        ).success(
-            _render_overview, [page_state, private_view], [boards_html, page_state]
-        )
+            [pages, rail, active_board, page_state, tasks_html, about_md, board_html],
+        ).success(_render_overview, page_state, [boards_html, page_state])
     return demo
 
 

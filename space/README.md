@@ -136,11 +136,10 @@ The tasks listed in `public_tasks/manifest.yaml` of the data repo have
 downloadable labels. They are tagged **Public** in the task tables and are
 scored like every other task.
 
-The Boards, Board and Tasks pages carry an **All tasks / Private tasks** switch.
-The private view, `&view=private`, leaves the public tasks out: boards are
-re-ranked on their private tasks only, and every link keeps the view. The home
-cards stay the full list of boards, so a board whose tasks are all public says
-so instead of disappearing. All tasks is the default.
+A board that mixes public and private tasks has an **Only private tasks**
+checkbox, below **Include models + HVG**. Ticking it re-ranks the board on its
+private tasks only, without a page reload. It is unticked by default. The home
+page, the rail and the Tasks page always show every task.
 
 ## Make a submission
 

@@ -190,13 +190,6 @@ a:hover { color: var(--marine-700); }
 #pm-main .pm-btn--outline:hover { background: var(--n-100) !important; }
 #pm-main .pm-btn--block { width: 100%; height: 2.25rem; font-size: 14px; }
 
-/* ---------- view switch (All tasks / Private tasks) ---------- */
-#pm-main .pm-toggle { display: inline-flex; flex: none; gap: 2px; padding: 3px; border-radius: var(--radius-lg); background: var(--n-100); }
-#pm-main .pm-toggle a { display: inline-flex; align-items: center; height: 1.75rem; padding: 0 14px; border-radius: var(--radius-md);
-  font: 400 14px/1 var(--font-sans); color: var(--text-muted); white-space: nowrap; }
-#pm-main .pm-toggle a:hover { color: var(--marine-700); }
-#pm-main .pm-toggle a.pm-active { background: var(--surface-raised, #fff); color: var(--marine-400); box-shadow: var(--shadow-sm); font-weight: 500; }
-
 /* ---------- tables ---------- */
 .pm-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
 .pm-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
@@ -223,17 +216,20 @@ a:hover { color: var(--marine-700); }
 .pm-hvg-chip { display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 5px;
   border: 1px solid var(--coral-400); border-radius: 3px; background: #fff;
   color: var(--coral-600); font-size: 11px; font-weight: 700; white-space: nowrap; }
-/* Board tables come rendered with and without `+ HVG` entries; the checkbox,
-   a sibling of the board's groups, shows one of the two.
+/* Board tables come rendered once per switch state (`+ HVG` entries shown or
+   not, all tasks or private ones); each checkbox, a sibling of the board's
+   groups, hides the variants that do not match it.
    Gradio restyles every checkbox (`appearance: none`, white tick), so the native
    control is restored. */
-#pm-main .pm-hvg-toggle { appearance: auto; width: 16px; height: 16px; margin: 0 6px 16px 0; background: none;
+#pm-main .pm-check { appearance: auto; width: 16px; height: 16px; margin: 0 6px 12px 0; background: none;
   vertical-align: middle; accent-color: var(--marine-400); cursor: pointer; }
-.pm-hvg-switch { display: inline-flex; align-items: center; vertical-align: middle; margin-bottom: 16px;
+.pm-switch { display: inline-flex; align-items: center; vertical-align: middle; margin-bottom: 12px;
   font-size: 14px; color: var(--text-secondary); cursor: pointer; user-select: none; }
-.pm-hvg-switch .pm-hvg-chip { margin-left: 4px; }
+.pm-switch .pm-hvg-chip { margin-left: 4px; }
 #pm-main .pm-hvg-toggle:checked ~ .pm-group .pm-without-hvg,
-#pm-main .pm-hvg-toggle:not(:checked) ~ .pm-group .pm-with-hvg { display: none; }
+#pm-main .pm-hvg-toggle:not(:checked) ~ .pm-group .pm-with-hvg,
+#pm-main .pm-private-toggle:checked ~ .pm-group .pm-all-tasks,
+#pm-main .pm-private-toggle:not(:checked) ~ .pm-group .pm-private-tasks { display: none; }
 .pm-table .pm-num { text-align: right; font-family: var(--font-mono); font-size: 13px; color: var(--text-body); }
 .pm-table .pm-num--dim { color: var(--n-400); }
 .pm-table .pm-sd { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; line-height: 1.2; white-space: nowrap; }

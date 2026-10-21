@@ -264,7 +264,7 @@ def test_perturbation_category_is_a_regular_board_with_centered_spearman(registr
     assert metric_label("centered_spearman") == "Centered Spearman score"
 
 
-def test_private_board_leaves_the_public_tasks_out_and_recounts(named, registry):
+def test_without_public_leaves_the_public_tasks_out_and_recounts(named, registry):
     board = named("bulk RNA")
     private = without_public(board, registry)
     assert private.task_ids == board.task_ids - {"t904"}
@@ -272,7 +272,7 @@ def test_private_board_leaves_the_public_tasks_out_and_recounts(named, registry)
     assert (private.n_cohorts, private.n_patients) == (3, 270)
 
 
-def test_a_board_of_public_tasks_is_empty_in_the_private_view(named, registry):
+def test_without_public_empties_a_board_of_public_tasks(named, registry):
     private = without_public(named("Dermatology"), registry)
     assert private.task_ids == frozenset()
     assert (private.n_cohorts, private.n_patients, private.n_diseases) == (0, 0, 0)
