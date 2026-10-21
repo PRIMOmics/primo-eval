@@ -10,8 +10,12 @@ package is `primomics`.
 
 ## 🚀 From install to the leaderboard
 
-⚡ Install uv → 📦 clone and install `primo` → 📥 download the data → 🧠 embed it →
-📊 score it locally → 🏆 submit it.
+1. ⚡ [Install uv](#-1-install-uv)
+2. 📦 [Clone and install primo](#-2-clone-and-install-primo)
+3. 📥 [Download the data](#-3-download-the-data)
+4. 🧠 [Embed the datasets](#-4-embed-the-datasets)
+5. 📊 [Score the public tasks locally](#-5-score-the-public-tasks-locally) (optional)
+6. 🏆 [Submit to the leaderboard](#-6-submit-to-the-leaderboard)
 
 You work in two folders, side by side. The clone of this repo runs `primo`, in its
 own environment. Your repo runs your model, in your environment:
