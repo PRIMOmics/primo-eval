@@ -35,7 +35,6 @@ copy of the labels repo with ``--labels-dir``:
 """
 
 import argparse
-import json
 import logging
 import math
 import os
@@ -74,6 +73,7 @@ from results import (
     HVG_REFERENCE_MODEL,
     IS_BASELINE,
     append_results,
+    task_rows,
     upload_hvg_reference,
 )
 
@@ -298,6 +298,7 @@ def publish_scores(config: BaselineConfig, result: dict, token: str | None) -> N
     Written under the config name and flagged ``is_baseline``, so the Space ranks
     it against submitted models instead of hiding it in a footnote. Re-publishing
     supersedes the previous run: the leaderboard keeps each name's latest rows.
+    ``task_rows`` builds the rows, as for every row of the Space.
 
     No ``hf_username`` is written, unlike a Submit-form row: a baseline has no
     owner, and ``append_results`` backfills the column. That is what keeps a
@@ -305,20 +306,8 @@ def publish_scores(config: BaselineConfig, result: dict, token: str | None) -> N
     """
     submitted_at = datetime.now(UTC).strftime(TIMESTAMP_FORMAT)
     rows = [
-        {
-            "model_name": config.name,
-            "task_id": task.task_id,
-            "score": round(float(task.score), 4),
-            "repeat_scores": json.dumps(
-                [round(float(value), 4) for value in task.repeat_scores]
-            ),
-            "diagnostics": json.dumps(
-                {key: round(float(value), 4) for key, value in task.diagnostics.items()}
-            ),
-            "submitted_at": submitted_at,
-            IS_BASELINE: True,
-        }
-        for task in result["per_task"]
+        {**row, IS_BASELINE: True}
+        for row in task_rows(config.name, result, submitted_at, "", {})
     ]
     if not rows:
         raise ValueError(
@@ -333,7 +322,7 @@ def publish_reference(config: BaselineConfig, path: Path, token: str | None) -> 
 
     Only the reference config is uploaded, together with its scores, so the
     features and the published baseline always come from one run. Existing
-    ``+ HVG`` entries must then be rescored with ``scripts/score_hvg_concat.py``.
+    ``+ HVG`` entries keep their scores until they are scored again with them.
     """
     if config.name != HVG_REFERENCE_MODEL:
         return

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import anndata as ad
 import baselines
@@ -18,6 +19,7 @@ from baselines import (
     prediction_ids,
     score_submission,
 )
+from results import IS_BASELINE, task_rows
 from scipy.sparse import csr_matrix
 
 
@@ -318,3 +320,22 @@ def test_score_submission_reads_the_hub_without_a_local_copy(tmp_path, monkeypat
     assert calls["token"] == "hf_test"
     assert "tasks" not in calls
     assert "fetch_labels" not in calls
+
+
+def test_published_scores_are_task_rows_flagged_as_a_baseline(monkeypatch):
+    published = []
+    monkeypatch.setattr(
+        baselines, "append_results", lambda rows, token: published.extend(rows)
+    )
+    result = {
+        "per_task": [
+            SimpleNamespace(
+                task_id="t901", score=0.51234, repeat_scores=[0.5], diagnostics={}
+            )
+        ]
+    }
+
+    baselines.publish_scores(CONFIGS["HVG-1200-genes"], result, None)
+
+    rows = task_rows("HVG-1200-genes", result, published[0]["submitted_at"], "", {})
+    assert published == [{**row, IS_BASELINE: True} for row in rows]

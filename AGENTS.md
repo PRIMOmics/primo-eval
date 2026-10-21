@@ -43,9 +43,8 @@ comes with its `oauth` extra, which the login button of the Space needs.
   `space/rescore.py` fills the board of a new version from the archived files.
 - `space_tests/`: the Space tests, one file per Space module.
 - `scripts/baselines.py`: builds the linear baselines, such as `HVG-1200-genes`,
-  from the public data; maintainers score and publish them.
-  `scripts/score_hvg_concat.py` scores the `+ HVG` entries of the archived
-  submissions again. Both use the scorer of `space/`.
+  from the public data; maintainers score and publish them with the scorer of
+  `space/`.
 
 ## Rules
 
