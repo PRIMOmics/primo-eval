@@ -1,7 +1,21 @@
 # 🧬 primo-eval
 
-Evaluation harness, task specs and baselines for the PRIMO benchmark. The Python
-package is `primomics`.
+PRIMO is a benchmark evaluating representations of biological foundation models on
+real-world clinical tasks such as treatment outcome, clinical score, endotype and
+perturbation response.
+
+You embed each sample of the PRIMO datasets with your model. A fixed probe, the same
+for every model, then predicts the target of each task from your embeddings, so the
+score measures the embedding. Most labels stay private: only the leaderboard can
+score these tasks. The labels of the public tasks are downloadable, so you can score
+those on your computer. The leaderboard ranks the models on boards, one per
+modality, therapeutic area and task family. Its
+[Method](https://huggingface.co/spaces/PRIMOmics/primo-eval?tab=method) and
+[Tasks](https://huggingface.co/spaces/PRIMOmics/primo-eval?tab=tasks) pages give the
+details.
+
+This repo holds `primo`, the command line that downloads the data, scores the public
+tasks and submits your embeddings. The Python package is `primomics`.
 
 🏆 [Leaderboard](https://huggingface.co/spaces/PRIMOmics/primo-eval) ·
 📦 [Data](https://huggingface.co/datasets/PRIMOmics/primo)
@@ -81,7 +95,9 @@ fetches the latest commit, into `primo-data/` by default (`--data-dir` changes i
 - `primo-lock.json` records the commit and a hash of every downloaded file.
 
 Use `--public-only` for the datasets that carry a public task, or `--datasets` for a
-comma-separated list of ids. Run the command again to get the latest data.
+comma-separated list of ids. To be ranked on every board, download and embed every
+dataset: a board ranks only the models that cover all its tasks. Run the command again
+to get the latest data.
 
 ### 🧠 4. Embed the datasets
 
@@ -94,8 +110,9 @@ dimensions: leave the extra columns empty.
 
 In bulk datasets, each row of `expression.h5ad` is a sample. In single-cell datasets,
 the rows are cells, and `obs["sample_id"]` gives their sample: submit one embedding
-per sample. `X` holds raw counts, unless the `input_normalization` of the dataset in
-`datasets.yaml` gives another scale.
+per sample. The columns are genes: `var_names` holds their NCBI Gene IDs, and
+`var["gene_symbols"]` holds their symbols. `X` holds raw counts, unless the
+`input_normalization` of the dataset in `datasets.yaml` gives another scale.
 
 This example embeds every downloaded bulk dataset with a simple baseline:
 log2(CPM + 1), then PCA. It is adapted from the
@@ -150,7 +167,7 @@ pd.concat(blocks).to_parquet("submission.parquet", index=False)
 
 Replace `embed` with your model: it gets one dataset and returns one row per id, in
 the order of `ids`. For single-cell data, set `MODALITY = "Single Cell RNA"`, and use
-`--modality single-cell-rna` in steps 5 and 6. The baseline then averages the cells
+`--modality single-cell-rna` in steps 3, 5 and 6. The baseline then averages the cells
 of each sample.
 
 ### 📊 5. Score the public tasks locally
@@ -192,8 +209,8 @@ uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
 ```
 
 `primo submit` runs the checks of `primo evaluate`, and checks that each dataset of
-the file is still the latest one on the Hub. If a dataset changed, run
-`uv run primo download` again, then embed that dataset again. `--dry-run` runs every
+the file is still the latest one on the Hub. If a dataset changed, download it again
+(step 3), then embed it again. `--dry-run` runs every
 check and sends nothing. Without it, the command sends the file to the
 [leaderboard Space](https://huggingface.co/spaces/PRIMOmics/primo-eval), which scores
 every task, the private ones included, and publishes the scores. Scoring takes a few
