@@ -30,6 +30,7 @@ runs.
 - Every code change comes with a test.
 - A PR needs a review and a green CI before it is merged.
 - PRs are merged with a merge commit, then their branch is deleted.
+- A merge does not deploy the leaderboard Space: see "Deploy the Space" below.
 - Maintainers can split a large change into stacked PRs: each PR targets the branch
   of the previous one and says "Stacked on #N". Merge them in order. After each
   merge, GitHub moves the next PR onto `main`.
@@ -87,3 +88,23 @@ Release steps:
    notes start with "Scores change" or "Scores do not change".
 3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`), so code
    taken from `main` never claims to be a release.
+
+## Deploy the Space
+
+The leaderboard Space runs the `space/` folder of `main`. After a merge that changes
+`space/`, a maintainer with write access to the `PRIMOmics/primo-eval` Space deploys it
+by hand, with their own Hugging Face login (`uv run hf auth login`):
+
+```bash
+git fetch origin
+tmp=$(mktemp -d) && git archive origin/main space | tar -x -C "$tmp"
+uv run hf upload PRIMOmics/primo-eval "$tmp/space" . --repo-type space \
+  --delete "*" --commit-message "Deploy $(git rev-parse --short origin/main)"
+```
+
+- `git archive` copies `space/` as it is on `main`, without local changes or cache
+  files.
+- `--delete "*"` also deletes the Space files that are no longer in `space/`. The Hub
+  always keeps `.gitattributes`.
+- The commit message says which commit of `main` the Space runs.
+- If your account cannot write to the Space, the Hub refuses the upload.

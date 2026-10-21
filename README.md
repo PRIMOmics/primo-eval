@@ -218,7 +218,8 @@ uv run ruff check
 uv run ruff format --check
 ```
 
-The leaderboard Space lives in `space/`. Its tests run in a separate environment,
+The leaderboard Space lives in `space/`. A merge does not deploy it: maintainers
+deploy it by hand (see `CONTRIBUTING.md`). Its tests run in a separate environment,
 with the packages of the Space:
 
 ```bash
