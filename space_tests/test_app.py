@@ -91,7 +91,7 @@ def _evaluate(
     monkeypatch.setattr(app, "append_results", append_results)
     monkeypatch.setattr(app, "archive_submission", lambda *args: {})
     monkeypatch.setattr(app, "append_submission", lambda meta, token: None)
-    monkeypatch.setattr(app, "_rendered_board", lambda slug, private: "board")
+    monkeypatch.setattr(app, "_rendered_board", lambda slug: "board")
 
     summary, _ = app.evaluate(
         "submission.csv",
@@ -104,7 +104,6 @@ def _evaluate(
         "",
         "",
         None,
-        False,
         SimpleNamespace(username="submitter"),
     )
     return summary
@@ -135,7 +134,6 @@ def test_owned_model_name_does_not_reveal_owner(monkeypatch):
         "",
         "",
         None,
-        False,
         SimpleNamespace(username="submitter"),
     )
 
@@ -190,18 +188,6 @@ def test_registry_flags_the_public_tasks(monkeypatch):
     assert registry["t902"]["public"] is True
 
 
-def test_the_private_view_is_read_from_the_url(monkeypatch, registry, boards):
-    monkeypatch.setattr(
-        app,
-        "_page_state",
-        lambda: (registry, boards, pd.DataFrame(columns=app.RESULT_COLUMNS)),
-    )
-    request = SimpleNamespace(query_params={"board": "bulk-rna", "view": "private"})
-    tab, _, _, private, _, tasks_html, _, board_html = app._init(request)
-    assert (tab, private) == ("board", True)
-    assert "Psoriasis PASI" not in tasks_html + board_html
-
-
 def test_overview_renders_from_the_state_init_hands_over(monkeypatch):
     by_id = {task_id: dict(task) for task_id, task in REGISTRY.items()}
     boards = build_boards(by_id)
@@ -209,12 +195,9 @@ def test_overview_renders_from_the_state_init_hands_over(monkeypatch):
     monkeypatch.setattr(app, "_page_state", lambda: (by_id, boards, df))
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
 
-    state = app._init(None)[4]
+    state = app._init(None)[3]
 
-    assert app._render_overview(state, private=False) == (
-        render_boards(boards, df, by_id, private=False),
-        None,
-    )
+    assert app._render_overview(state) == (render_boards(boards, df, by_id), None)
 
 
 def test_submission_also_saves_its_hvg_concatenation_entry(monkeypatch):
