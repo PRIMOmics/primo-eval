@@ -18,6 +18,8 @@ the old version, on a task that still exists.
 - A submission is skipped when the current version already holds rows of its
   entry from the same time or later. A second run after the deploy then only
   picks up the submissions made in between.
+- An entry that fails, or that gets no score on a task it held, stops the run
+  before anything is published. ``--models`` leaves an entry out on purpose.
 
 ``--from legacy`` reads the rows written before versions existed.
 
@@ -53,6 +55,8 @@ from evaluator import (
 )
 from leaderboard import latest_only
 from results import (
+    ARCHIVE_DIR,
+    ARCHIVE_MANIFEST,
     HVG_REFERENCE_MODEL,
     HVG_TAG,
     INSTITUTION,
@@ -63,6 +67,7 @@ from results import (
     PAPER_LINK,
     SUBMISSION_ID,
     append_results,
+    archive_paths,
     fetch_hvg_reference,
     hvg_name,
     read_results,
@@ -73,8 +78,6 @@ from results import (
 )
 from versions import CURRENT, VERSIONS
 
-ARCHIVE_PREFIX = "models/"
-MANIFEST_FILENAME = "manifest.json"
 LEGACY = "legacy"
 LEGACY_GENE_SPACE = ("COMPASS",)
 CREDITS = (OWNER, INSTITUTION, IS_AUTHOR_SUBMISSION, PAPER_LINK)
@@ -157,10 +160,7 @@ def carried(
                 submitted_at=manifest["submitted_at"],
                 modality=manifest["modality"],
                 representation=representation_of(manifest),
-                archive=(
-                    f"{ARCHIVE_PREFIX}{submission_id}/"
-                    f"submission{manifest['source_format'] or '.bin'}"
-                ),
+                archive=archive_paths(submission_id, manifest["source_format"])[0],
                 task_ids=_task_set(rows, added, all_tasks),
                 credits={key: parent[key] for key in CREDITS},
             )
@@ -251,6 +251,10 @@ def rescore(
             checkpoint_dir=checkpoint_dir,
             reference=features,
         )
+        for invalid in result["invalid"]:
+            logging.warning(
+                "%s: no score on %s: %s", model, invalid[TASK_ID], invalid["reason"]
+            )
         return task_rows(
             model, result, carry.submitted_at, carry.submission_id, carry.credits
         )
@@ -258,6 +262,58 @@ def rescore(
     if carry.is_baseline:
         return [{**row, IS_BASELINE: True} for row in _rows(carry.model_name, None)]
     return _rows(carry.model_name, None) + _rows(hvg_name(carry.model_name), reference)
+
+
+def lost_tasks(carry: Carry, rows: list[dict], added: set[str]) -> list[str]:
+    """The tasks ``carry`` held that one of its entries got no row for."""
+    if carry.task_ids is None:
+        return []
+    names = [carry.model_name]
+    if not carry.is_baseline:
+        names.append(hvg_name(carry.model_name))
+    held = carry.task_ids - added
+    lost = set()
+    for name in names:
+        lost |= held - {row[TASK_ID] for row in rows if row[MODEL_NAME] == name}
+    return sorted(lost)
+
+
+def _score_carries(
+    carries: list[Carry],
+    added: set[str],
+    reference: Path,
+    datasets: list[dict],
+    registry: list[dict],
+    token: str | None,
+    checkpoint_dir: Path | None,
+) -> tuple[list[dict], list[str]]:
+    """The rows of every carry, and one line per carry that failed."""
+    rows, failures = [], []
+    with TemporaryDirectory() as workdir:
+        for carry in carries:
+            source = (
+                reference if carry.archive is None else _download(carry.archive, token)
+            )
+            try:
+                scored = rescore(
+                    carry,
+                    source,
+                    reference,
+                    datasets,
+                    registry,
+                    Path(workdir),
+                    token,
+                    checkpoint_dir,
+                )
+            except (SubmissionError, EvaluatorError) as error:
+                failures.append(f"{carry.model_name}: {error}")
+                continue
+            lost = lost_tasks(carry, scored, added)
+            if lost:
+                failures.append(f"{carry.model_name}: no score on held tasks {lost}")
+            logging.info("%s: %d rows", carry.model_name, len(scored))
+            rows += scored
+    return rows, failures
 
 
 def _manifests(token: str | None) -> list[dict]:
@@ -268,7 +324,7 @@ def _manifests(token: str | None) -> list[dict]:
     return [
         json.loads(_download(path, token).read_text())
         for path in files
-        if path.startswith(ARCHIVE_PREFIX) and path.endswith(f"/{MANIFEST_FILENAME}")
+        if path.startswith(f"{ARCHIVE_DIR}/") and path.endswith(f"/{ARCHIVE_MANIFEST}")
     ]
 
 
@@ -340,13 +396,14 @@ def main() -> None:
             fetch_manifest(token, old_version.data),
         )
     )
+    added = task_ids - old_ids
     results = read_results(token)
     carries, orphans = carried(
         version_rows(results, "" if old_version is None else old_version.number),
         version_rows(results, CURRENT.number),
         _manifests(token),
         task_ids,
-        task_ids - old_ids,
+        added,
         args.all_tasks,
     )
     carries = [c for c in carries if args.models is None or c.model_name in args.models]
@@ -358,31 +415,22 @@ def main() -> None:
     if args.dry_run:
         return
 
-    reference = fetch_hvg_reference(token)
-    rows = []
-    with TemporaryDirectory() as workdir:
-        for carry in carries:
-            source = (
-                reference if carry.archive is None else _download(carry.archive, token)
-            )
-            try:
-                scored = rescore(
-                    carry,
-                    source,
-                    reference,
-                    datasets,
-                    registry,
-                    Path(workdir),
-                    token,
-                    args.checkpoint_dir,
-                )
-            except (SubmissionError, EvaluatorError) as error:
-                logging.warning("skipped %s: %s", carry.model_name, error)
-                continue
-            logging.info("%s: %d rows", carry.model_name, len(scored))
-            rows += scored
+    rows, failures = _score_carries(
+        carries,
+        added,
+        fetch_hvg_reference(token),
+        datasets,
+        registry,
+        token,
+        args.checkpoint_dir,
+    )
     if args.out is not None:
         pd.DataFrame(rows).to_csv(args.out, index=False)
+    if failures:
+        raise SystemExit(
+            f"{len(failures)} entries failed, so nothing is published. Fix them, "
+            "or leave them out with --models:\n" + "\n".join(failures)
+        )
     if args.publish:
         append_results(rows, token)
         logging.info("published %d rows into version %s", len(rows), CURRENT.number)

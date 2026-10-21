@@ -18,6 +18,8 @@ from results import (
     SUBMISSION_ID,
     VERSION,
     _embedding_manifest,
+    archive_paths,
+    archive_submission,
     display_name,
     fetch_hvg_reference,
     owner_of,
@@ -244,3 +246,29 @@ def test_versions_are_read_back_as_text(tmp_path, monkeypatch):
     df = with_version(read_csv("task_results.csv", RESULT_COLUMNS, None))
 
     assert list(df[VERSION]) == ["0.10", ""]
+
+
+def test_a_submission_is_archived_where_the_rescore_reads_it(tmp_path, monkeypatch):
+    path = tmp_path / "submission.csv"
+    pd.DataFrame({"dataset_id": ["d901"], "sample_id": ["s1"], "dim_0": [1.0]}).to_csv(
+        path, index=False
+    )
+    commits = []
+
+    class Api:
+        def __init__(self, token):
+            pass
+
+        def create_commit(self, operations, **kwargs):
+            commits.append([operation.path_in_repo for operation in operations])
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+
+    archive_submission(path, "m", "s1", "bulk-rna", "2026-01-01", None)
+
+    assert commits == [list(archive_paths("s1", ".csv"))]
+    assert archive_paths("s1", ".csv") == (
+        "models/s1/submission.csv",
+        "models/s1/manifest.json",
+    )
+    assert archive_paths("s1", "")[0] == "models/s1/submission.bin"

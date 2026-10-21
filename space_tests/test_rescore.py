@@ -1,12 +1,20 @@
 """Unit tests for the rescore tool (no network)."""
 
+import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 import rescore
-from evaluator import EMBEDDING, GENE_SPACE, SubmissionError, load_submission
-from rescore import Carry, carried, representation_of, without_retired
+from evaluator import (
+    EMBEDDING,
+    GENE_SPACE,
+    EvaluatorError,
+    SubmissionError,
+    load_submission,
+)
+from rescore import Carry, carried, lost_tasks, representation_of, without_retired
 from results import (
     HVG_REFERENCE_MODEL,
     IS_BASELINE,
@@ -218,16 +226,23 @@ def test_a_file_with_no_dataset_listed_is_refused(tmp_path):
         without_retired(path, {"d901"}, tmp_path / "out.parquet")
 
 
-def _fake_score_all(calls: list):
+def _fake_score_all(calls: list, invalid: frozenset[str] = frozenset()):
     def score_all(path, token, **kwargs):
         calls.append(kwargs)
+        task_ids = [task["task_id"] for task in kwargs["tasks"]]
         return {
             "per_task": [
                 SimpleNamespace(
-                    task_id=task["task_id"], score=0.5, repeat_scores=[], diagnostics={}
+                    task_id=task_id, score=0.5, repeat_scores=[], diagnostics={}
                 )
-                for task in kwargs["tasks"]
-            ]
+                for task_id in task_ids
+                if task_id not in invalid
+            ],
+            "invalid": [
+                {"task_id": task_id, "reason": "labelled samples missing"}
+                for task_id in task_ids
+                if task_id in invalid
+            ],
         }
 
     return score_all
@@ -282,3 +297,77 @@ def test_the_rescored_baseline_stays_a_baseline(tmp_path, monkeypatch):
     assert [(call["representation"], call["reference"]) for call in calls] == [
         (GENE_SPACE, None)
     ]
+
+
+def test_a_task_scored_invalid_gets_no_row_and_is_logged(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(rescore, "score_all", _fake_score_all([], frozenset({"t902"})))
+    carry = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, set())[0][0]
+    source = _submission(tmp_path / "in.parquet", "d901")
+
+    rows = rescore.rescore(
+        carry,
+        source,
+        tmp_path / "hvg.parquet",
+        [{"id": "d901"}],
+        REGISTRY,
+        tmp_path,
+        None,
+    )
+
+    assert {row["task_id"] for row in rows} == {"t901"}
+    assert "eva: no score on t902: labelled samples missing" in caplog.text
+    assert lost_tasks(carry, rows, set()) == ["t902"]
+
+
+SCORED = [
+    {MODEL_NAME: name, "task_id": task_id}
+    for name in ("eva", hvg_name("eva"))
+    for task_id in ("t901", "t902")
+]
+
+
+def test_a_held_task_without_a_row_is_lost_but_an_added_one_is_not():
+    carry = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, {"t903"})[0][0]
+
+    assert lost_tasks(carry, SCORED, {"t903"}) == []
+    assert lost_tasks(carry, SCORED[:3], {"t903"}) == ["t902"]
+    assert lost_tasks(replace(carry, task_ids=None), [], set()) == []
+
+
+def _patch_main(monkeypatch, tmp_path, score) -> list:
+    published = []
+    monkeypatch.setenv("HF_TOKEN", "token")
+    monkeypatch.setattr(sys, "argv", ["rescore.py", "--from", "legacy", "--publish"])
+    monkeypatch.setattr(rescore, "fetch_manifest", lambda token: [{"id": "d901"}])
+    monkeypatch.setattr(rescore, "fetch_tasks_registry", lambda token: REGISTRY)
+    monkeypatch.setattr(rescore, "read_results", lambda token: EVA)
+    monkeypatch.setattr(rescore, "_manifests", lambda token: [EVA_ARCHIVE])
+    monkeypatch.setattr(rescore, "fetch_hvg_reference", lambda token: tmp_path)
+    monkeypatch.setattr(rescore, "_download", lambda path, token: tmp_path)
+    monkeypatch.setattr(rescore, "rescore", score)
+    monkeypatch.setattr(
+        rescore, "append_results", lambda rows, token: published.append(rows)
+    )
+    return published
+
+
+def test_the_rows_are_published_when_every_entry_is_scored(tmp_path, monkeypatch):
+    published = _patch_main(monkeypatch, tmp_path, lambda carry, *args: SCORED)
+
+    rescore.main()
+
+    assert published == [SCORED]
+
+
+def _fail(carry, *args):
+    raise EvaluatorError("reference features lack dataset d901")
+
+
+@pytest.mark.parametrize("score", [_fail, lambda carry, *args: SCORED[:3]])
+def test_a_failed_entry_stops_the_publish(tmp_path, monkeypatch, score):
+    published = _patch_main(monkeypatch, tmp_path, score)
+
+    with pytest.raises(SystemExit, match="nothing is published"):
+        rescore.main()
+
+    assert published == []

@@ -114,13 +114,16 @@ A release that changes scores also opens a board version:
    ```
 
    The Space still runs version `0.1`, which shows only its own rows. Add
-   `--dry-run` first to list the entries without scoring them.
+   `--dry-run` first to list the entries without scoring them. If an entry fails,
+   or gets no score on a task it held, nothing is published: fix it, or leave it
+   out with `--models`.
 4. Deploy the tag (see "Deploy the Space").
 5. Run step 3 again: it adds the submissions made before the deploy.
 
-Push the data of a new version to the Hub only when its release is deployed. The
-quickstart and `primo download` read the latest data, and the Space refuses a file
-with a dataset that its version does not list.
+Step 1 pins the commit of the new data, so the data is on the Hub before the
+release PR. Deploy soon after it: until the deploy, the quickstart and
+`primo download` already read the new data, and the live Space refuses a file with
+a dataset that its version does not list.
 
 ## Deploy the Space
 

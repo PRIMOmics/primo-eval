@@ -224,7 +224,8 @@ embedding files of the previous version, so nobody has to submit again. Each liv
 submission is scored again, plain and `+ HVG`, and keeps its name, credits,
 submission id and date. The `HVG-1200-genes` baseline is scored again from the
 reference features. An entry keeps its tasks, plus the tasks the new version adds.
-The release steps are in `CONTRIBUTING.md`.
+If an entry fails, or gets no score on a task it held, nothing is published. The
+release steps are in `CONTRIBUTING.md`.
 
 ## Space configuration
 
