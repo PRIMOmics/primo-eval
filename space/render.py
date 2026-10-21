@@ -138,9 +138,15 @@ def _brand(version: Version) -> str:
     )
 
 
+def _number(version: Version) -> tuple[int, ...]:
+    """The version number as integers, so ``0.10`` comes after ``0.9``."""
+    return tuple(int(part) for part in version.number.split("."))
+
+
 def _closed_on(version: Version) -> str:
     """The day the version after ``version`` opened."""
-    return min(listed.opened for listed in VERSIONS if listed.opened > version.opened)
+    later = [listed for listed in VERSIONS if _number(listed) > _number(version)]
+    return min(later, key=_number).opened
 
 
 def _closed_notice(version: Version) -> str:
