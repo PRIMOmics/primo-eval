@@ -1,0 +1,8 @@
+numpy
+pandas
+pyarrow
+joblib
+scikit-learn
+pyyaml
+huggingface_hub<1.0
+audioop-lts; python_version >= "3.13"

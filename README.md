@@ -218,6 +218,16 @@ uv run ruff check
 uv run ruff format --check
 ```
 
+The leaderboard Space lives in `space/`. Its tests run in a separate environment,
+with the packages of the Space:
+
+```bash
+uv run --isolated --no-project --python 3.13 \
+  --with-requirements space/requirements.txt \
+  --with "gradio[oauth]==5.50.0" --with pytest \
+  pytest space_tests
+```
+
 Before you open a pull request, read `CONTRIBUTING.md`.
 
 ## 📄 License

@@ -1,0 +1,636 @@
+"""Unit tests for the PRIMO page markup (no network, no Gradio).
+
+These guard the guarantees a redesign must not lose: every board is reachable,
+open slices route to Contribute, registry and submission text is escaped, the
+baseline/first-submission states read correctly, the leaderboard bolds the best
+value, provenance never leaks, and public submission credits are safely escaped.
+"""
+
+import re
+from pathlib import Path
+
+import pandas as pd
+import render
+from boards import AREA_GROUP, GROUP_NOTE, MODALITY_GROUP, build_boards, open_in_group
+from leaderboard import ELO_ANCHOR_MODEL
+from render import (
+    SECTIONS,
+    evaluation_confirmation,
+    evaluation_status,
+    rail_html,
+    render_board,
+    render_boards,
+    render_tasks,
+)
+
+
+def _slugs(html: str) -> list[str]:
+    return re.findall(r'href="\?board=([^"]+)"', html)
+
+
+def _boards_html(boards, registry, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    return render_boards(boards, df, registry, private=False)
+
+
+# ---------------------------------------------------------------- boards page
+def test_every_board_is_reachable_from_the_boards_page(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert set(_slugs(html)) == {b.slug for b in boards}
+
+
+def test_each_facet_section_shows_with_its_note(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert "Per therapeutic areas" in html
+    assert "Task Category" in html
+    assert "Every task of one omics layer" in html
+    assert "PRIMO evaluates zero-shot representations of omics samples" in html
+
+
+def test_modality_labels_start_with_a_capital(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert "Bulk RNAseq" in html
+    assert "Single-cell RNAseq" in html
+    assert "Proteomics" in html
+    assert "Spatial transcriptomics" in html
+    assert "Leaderboards" in html
+
+
+def test_area_and_category_cards_name_their_modality(registry, results):
+    registry["t906"] = {
+        **registry["t905"],
+        "task_id": "t906",
+        "modality": "Single Cell RNA",
+    }
+    html = _boards_html(build_boards(registry), registry, results)
+
+    assert "Rheumatology - bulk RNAseq" in html
+    assert "Rheumatology - scRNAseq" in html
+    assert "Endotype - bulk RNAseq" in html
+    assert "Endotype - scRNAseq" in html
+
+
+def test_open_cards_state_the_slices_nobody_covers(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert "Proteomics" in html
+    assert "Neuroscience" in html
+    assert "OPEN" in html
+
+
+def test_both_open_axes_get_their_own_counter(boards, registry, results):
+    """Modality declares three gaps and Therapeutic Areas two; each has a counter."""
+    html = _boards_html(boards, registry, results)
+    assert f"{GROUP_NOTE[MODALITY_GROUP]} · +3 open" in html
+    assert f"{GROUP_NOTE[AREA_GROUP]} · +2 open" in html
+
+
+def test_an_open_card_sends_the_visitor_to_contribute(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert 'href="?tab=contribute"' in html
+    assert "Propose a cohort" in html
+
+
+def test_an_open_card_disappears_once_the_registry_covers_it(registry, results):
+    registry["t906"] = {
+        **registry["t905"],
+        "task_id": "t906",
+        "modality": "Single Cell RNA",
+    }
+    boards = build_boards(registry)
+    html = _boards_html(boards, registry, results)
+    assert 'href="?board=single-cell-rna"' in html
+    assert f"{GROUP_NOTE[MODALITY_GROUP]} · +2 open" in html
+    assert "Proteomics" in html
+
+
+def test_live_cards_teaser_the_leaders(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert "Leading" in html
+    assert "eva" in html
+
+
+def test_a_live_card_drops_the_prose_an_open_card_keeps(boards, registry, results):
+    """Live cards are title, counts and podium; only open cards still explain."""
+    html = _boards_html(boards, registry, results)
+    assert "Every PRIMO task" not in html
+    assert "No cohort yet" in html
+
+
+def test_the_podium_is_medalled(boards, registry, results):
+    """Rank reads off the medal, so the card needs no numbering column."""
+    df = pd.concat(
+        [
+            results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry]),
+            results(*[("scgpt", tid, 0.6, "2026-01-01") for tid in registry]),
+        ],
+        ignore_index=True,
+    )
+    html = render_boards(boards, df, registry, private=False)
+    assert "🥇" in html
+    assert "🥈" in html
+
+
+def test_a_board_nobody_covered_invites_the_first_submission(boards, registry, results):
+    """A board no model covered in full asks for the first entry, not a leader."""
+    html = render_boards(
+        boards, results(("eva", "t901", 0.8, "2026-01-01")), registry, private=False
+    )
+    assert "be the first" in html.lower()
+
+
+def test_a_board_held_only_by_baselines_lists_its_models(
+    boards, registry, flagged_results
+):
+    """A board card lists its leading models without special baseline copy."""
+    df = flagged_results(
+        *[("pca-50", tid, 0.8, "2026-01-01", True) for tid in registry]
+    )
+    html = render_boards(boards, df, registry, private=False)
+    assert "be the first" not in html.lower()
+    assert "pca-50" in html
+
+
+def test_a_baseline_is_teased_like_any_other_leader(boards, registry, flagged_results):
+    """The card tags nothing: a baseline is a podium line, not a footnote."""
+    df = flagged_results(
+        *[("pca-50", tid, 0.8, "2026-01-01", True) for tid in registry],
+        *[("eva", tid, 0.9, "2026-01-01", False) for tid in registry],
+    )
+    html = render_boards(boards, df, registry, private=False)
+    assert "pca-50" in html and "eva" in html
+    assert "pm-badge--marine" not in html
+
+
+def test_cards_carry_their_counts(boards, registry, results):
+    html = _boards_html(boards, registry, results)
+    assert "patients" in html and "cohorts" in html and "diseases" in html
+
+
+def test_registry_text_is_escaped_on_the_boards_page(registry, results):
+    """The board name is the registry text a card still prints, so it is the probe."""
+    registry["t904"]["therapeutic_area"] = '<img src=x onerror="alert(1)">'
+    boards = build_boards(registry)
+    html = _boards_html(boards, registry, results)
+    assert "<img src=x" not in html
+    assert "&lt;img src=x" in html
+
+
+# ------------------------------------------------------------------- board page
+def test_ranked_table_bolds_the_best_and_captions_full_coverage(
+    boards, registry, named, flagged_results
+):
+    df = flagged_results(
+        *[("eva", tid, 0.9, "2026-01-01", False) for tid in registry],
+        *[("foo", tid, 0.5, "2026-01-01", False) for tid in registry],
+    )
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "are ranked" in html
+    assert "eva" in html and "foo" in html
+    assert "font-weight:700" in html  # the best value is bolded
+
+
+def test_ranked_table_bolds_the_lowest_mean_rank():
+    df = pd.DataFrame(
+        {
+            "Elo": [1200, 1000],
+            "Mean rank": [2.0, 1.0],
+            "Mean score": [0.9, 0.8],
+        }
+    )
+
+    bold = render._bold_cells(df, list(df.columns), axis=0)
+
+    assert (1, "Mean rank") in bold
+    assert (0, "Mean rank") not in bold
+    assert (0, "Elo") in bold
+    assert (0, "Mean score") in bold
+
+
+def test_data_tables_expose_sortable_column_headers(boards, registry, named, results):
+    df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert 'class="pm-sort" data-sort-index="0"' in html
+    assert 'aria-sort="none"' in html
+
+
+def test_per_task_names_expose_expanded_accessible_context(registry, named, results):
+    df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+
+    assert 'class="pm-task-guide"' in html
+    assert "Patients: 90 patients with Crohn Disease, Ulcerative Colitis" in html
+    assert "input data: bulk RNA profiles from digestive system" in html
+    assert "outcome: endoscopic remission" in html
+    assert 'tabindex="0"' in html
+
+
+def test_per_task_scores_show_sd_only_when_repeats_are_available(
+    registry, named, results
+):
+    df = results(
+        ("repeated", "t901", 0.7, "2026-01-01"),
+        ("single", "t901", 0.6, "2026-01-01"),
+        ("missing", "t901", 0.5, "2026-01-01"),
+    ).assign(repeat_scores=["[0.6, 0.8]", "[0.6]", ""])
+
+    html = render_board(named("Gastroenterology"), df, registry, private=False)
+
+    assert '<span class="pm-sd" aria-hidden="true"> ± 0.100</span>' in html
+    css = Path(render.__file__).with_name("primo.css").read_text()
+    assert ".pm-table .pm-sd { display: block;" in css
+    assert 'data-sort-value="0.700"' in html
+    assert "Standard deviation across 2 repeats: 0.100" in html
+    assert html.count('class="pm-sd"') == 1
+    assert "Scores show mean ± SD when repeat-level results are available." in html
+
+
+def test_category_board_markup_is_scoped_to_its_named_modality(registry, results):
+    registry["t906"] = {
+        **registry["t905"],
+        "task_id": "t906",
+        "modality": "Single Cell RNA",
+        "title": "Single-cell RA endotype",
+    }
+    board = next(
+        board
+        for board in build_boards(registry)
+        if board.name == "Endotype" and board.modality == "Single Cell RNA"
+    )
+    html = render_board(
+        board,
+        results(
+            ("m", "t905", 0.5, "2026-01-01"),
+            ("m", "t906", 0.6, "2026-01-01"),
+        ),
+        registry,
+        private=False,
+    )
+
+    assert ">Area<" in html
+    assert ">Modality<" in html
+    assert ">Single-cell RNAseq<" in html
+    assert ">Bulk RNAseq<" not in html
+    assert "Single-cell RA endotype" in html
+    assert "RA blood endotype" not in html
+    assert "<h1>Endotype - scRNAseq</h1>" in html
+
+
+def test_task_tooltip_discloses_repeated_collection_samples(registry, results):
+    registry["t901"]["n_subjects"] = 20
+    registry["t901"]["n_samples"] = 126
+    boards = build_boards(registry)
+    board = next(board for board in boards if board.name == "Bulk RNAseq")
+    html = render_board(
+        board, results(("eva", "t901", 0.8, "2026-01-01")), registry, private=False
+    )
+    assert "20 patients (126 collection samples)" in html
+
+
+def test_native_score_cells_explain_ranges_and_random_performance(
+    registry, named, results
+):
+    df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+
+    assert 'data-tooltip="Range: 0 to 1 · Random predictor: 0.5"' in html
+    assert 'data-tooltip="Range: -1 to 1 · Random predictor: 0 (expected)"' in html
+    assert re.search(
+        r'<td class="pm-num"[^>]*><span class="pm-score-guide" tabindex="0" '
+        r'aria-label="Score 0\.800\. Range: 0 to 1 · Random predictor: 0\.5"',
+        html,
+    )
+    assert re.search(
+        r'<td class="pm-num"[^>]*><span class="pm-score-guide" tabindex="0" '
+        r'aria-label="Score 0\.800\. Range: -1 to 1 · Random predictor: 0 '
+        r'\(expected\)"',
+        html,
+    )
+
+    centered = render._df_to_table(
+        pd.DataFrame(
+            [
+                {"Metric": "Centered Spearman score", "model": 0.2},
+                {"Metric": "Centered Spearman score", "model": None},
+            ]
+        ),
+        bold_axis=1,
+        empty="",
+    )
+    assert 'data-tooltip="Range: -1 to 1 · Random predictor: 0 (expected)"' in centered
+    assert "Score None" not in centered
+    assert '<td class="pm-num pm-num--dim">n/a</td>' in centered
+
+
+def test_ranked_board_shows_only_the_institution_credit(
+    boards, registry, flagged_results
+):
+    df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
+    df["institution"] = "Scienta"
+    html = render_board(build_boards(registry)[0], df, registry, private=False)
+    assert "Institution" in html and "Scienta" in html
+    assert "Team" not in html
+    assert "Author" not in html
+
+
+def test_board_escapes_submission_credit(registry, named, flagged_results):
+    df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
+    df["institution"] = "<script>alert(1)</script>"
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "<script>" not in html and "&lt;script&gt;" in html
+
+
+def test_author_submission_gets_a_check_chip_and_paper_link(
+    registry, named, flagged_results
+):
+    df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
+    df["is_author_submission"] = True
+    df["paper_link"] = "https://example.org/paper"
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert 'href="https://example.org/paper"' in html
+    assert ">eva</a>" in html
+    assert 'class="pm-author-chip"' in html
+    assert "✓ Authors" in html
+
+
+def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(
+    registry, named, flagged_results
+):
+    df = flagged_results(
+        *[("eva + HVG", tid, 0.9, "2026-01-01", False) for tid in registry]
+    )
+    df["is_author_submission"] = True
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    with_hvg = html.split('class="pm-with-hvg"')[1].split('class="pm-without-hvg"')[0]
+    ranked = with_hvg.split('class="pm-hvg-chip"')
+    assert len(ranked) == 2
+    assert ranked[0].endswith("eva <span ")
+    assert '+ HVG</span> <span class="pm-author-chip"' in ranked[1]
+
+
+def _variants(html: str) -> tuple[str, str]:
+    """The ranked tables shown with and without ``+ HVG`` entries."""
+    ranked = html.split("Per task")[0]
+    with_hvg, plain = ranked.split('class="pm-without-hvg"')
+    return with_hvg.split('class="pm-with-hvg"')[1], plain
+
+
+def test_hvg_entries_are_shown_by_default_and_can_be_hidden(
+    registry, named, flagged_results
+):
+    df = flagged_results(
+        *[("eva", tid, 0.5, "2026-01-01", False) for tid in registry],
+        *[("eva + HVG", tid, 0.9, "2026-01-01", False) for tid in registry],
+        *[("foo", tid, 0.7, "2026-01-01", False) for tid in registry],
+    )
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert render.HVG_TOGGLE in html
+    assert re.search(r'<input type="checkbox"[^>]*class="pm-hvg-toggle" checked>', html)
+    with_hvg, plain = _variants(html)
+    assert "pm-hvg-chip" in with_hvg and "pm-hvg-chip" not in plain
+    rank_one = '<td class="pm-num">1</td><td class="pm-name">'
+    assert f"{rank_one}eva <span" in with_hvg
+    assert f"{rank_one}foo</td>" in plain
+    per_task_with_hvg, per_task_plain = html.split("Per task")[1].split(
+        'class="pm-without-hvg"'
+    )
+    assert ">eva + HVG</th>" in per_task_with_hvg
+    assert "eva + HVG" not in per_task_plain
+
+
+def test_hvg_toggle_css_hides_the_unselected_variant():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+    assert "#pm-main .pm-hvg-toggle:checked ~ .pm-group .pm-without-hvg" in css
+    assert "#pm-main .pm-hvg-toggle:not(:checked) ~ .pm-group .pm-with-hvg" in css
+
+
+def test_a_board_without_hvg_entries_has_no_toggle(registry, named, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "pm-hvg-toggle" not in html
+    assert "pm-without-hvg" not in html
+
+
+def test_hvg_entries_on_other_boards_add_no_toggle(registry, named, results):
+    df = results(
+        *[("eva", tid, 0.8, "2026-01-01") for tid in registry],
+        ("eva + HVG", "t904", 0.9, "2026-01-01"),
+    )
+    gastro = render_board(named("Gastroenterology"), df, registry, private=False)
+    derma = render_board(named("Dermatology"), df, registry, private=False)
+    assert "pm-hvg-toggle" not in gastro
+    assert "pm-hvg-toggle" in derma
+
+
+def test_unsafe_paper_link_is_not_rendered_as_a_link(registry, named, flagged_results):
+    df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
+    df["paper_link"] = 'javascript:alert("x")'
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "javascript:" not in html
+    assert ">eva<" in html
+
+
+def test_board_keeps_legacy_private_owners_hidden(registry, named, flagged_results):
+    df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
+    df["hf_username"] = "legacy-private-owner"
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "legacy-private-owner" not in html
+
+
+def test_board_escapes_a_hostile_model_name(registry, named, flagged_results):
+    hostile = "<img src=x onerror=1>"
+    df = flagged_results(
+        *[(hostile, tid, 0.9, "2026-01-01", False) for tid in registry]
+    )
+    html = render_board(named("bulk RNA"), df, registry, private=False)
+    assert "<img src=x" not in html
+    assert "&lt;img src=x" in html
+
+
+def test_an_empty_board_invites_the_first_submission(registry, results, named):
+    html = render_board(named("bulk RNA"), results(), registry, private=False)
+    assert "be the first" in html.lower()
+
+
+def test_a_missing_board_renders_a_message_not_a_crash(registry, results):
+    html = render_board(None, results(), registry, private=False)
+    assert "No board available" in html
+
+
+# ------------------------------------------------------------------- tasks page
+def test_tasks_page_shows_biology_but_never_an_accession(registry):
+    html = render_tasks(registry, private=False)
+    assert "Crohn Disease" in html
+    assert "Treatment outcome" in html
+    assert not re.search(r"GSE\d+|E-MTAB-\d+", html)
+
+
+def test_tasks_page_escapes_registry_text(registry):
+    registry["t904"]["diseases"] = ['<img src=x onerror="alert(1)">']
+    html = render_tasks(registry, private=False)
+    assert "<img src=x" not in html
+    assert "&lt;img src=x" in html
+
+
+# ------------------------------------------------------------------------ rail
+def test_rail_links_every_board_and_marks_the_active_one(boards, registry):
+    active = boards[0].slug
+    html = rail_html(boards, registry, active, None, private=False)
+    assert set(_slugs(html)) == {b.slug for b in boards}
+    assert f'class="pm-link pm-active" target="_self" href="?board={active}"' in html
+    assert "Submit a model" in html
+
+
+def test_rail_boards_control_has_a_visible_chevron(boards, registry):
+    html = rail_html(boards, registry, None, None, private=False)
+
+    assert '<details class="pm-rail-section" open>' in html
+    assert '<summary class="pm-rail-summary pm-active">' in html
+    assert '<svg class="pm-chevron" viewBox="0 0 16 16" width="16" height="16"' in html
+    assert 'stroke="#fff"' in html
+    assert 'stroke-width="2"' in html
+
+    css = Path(render.__file__).with_name("primo.css").read_text()
+    chevron_rule = re.search(r"\.pm-rail-summary \.pm-chevron\s*\{([^}]*)\}", css)
+    assert chevron_rule is not None
+    assert "color: #fff" in chevron_rule.group(1)
+
+
+def test_rail_groups_contain_their_board_links(boards, registry):
+    html = rail_html(boards, registry, None, None, private=False)
+    groups = re.findall(r'<div class="pm-rail-group">(.*?)</div>', html)
+    grouped = "".join(groups)
+    n_open = sum(len(open_in_group(boards, group)) for group in SECTIONS)
+
+    assert set(_slugs(grouped)) == {board.slug for board in boards}
+    assert grouped.count('href="?tab=contribute"') == n_open
+
+
+def test_rail_open_slices_route_to_contribute(boards, registry):
+    html = rail_html(boards, registry, None, None, private=False)
+    assert 'href="?tab=contribute"' in html
+    assert "Proteomics" in html
+
+
+def test_rail_category_labels_render_in_uppercase():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+    label_rule = re.search(r"\.pm-rail-label\s*\{([^}]*)\}", css)
+
+    assert label_rule is not None
+    assert "text-transform: uppercase" in label_rule.group(1)
+
+
+def test_rail_category_labels_use_consistent_authored_casing(boards, registry):
+    html = rail_html(boards, registry, None, None, private=False)
+    labels = re.findall(r'<p class="pm-rail-label">([^<]+)</p>', html)
+
+    assert labels == ["Per modality", "Per therapeutic areas", "Task Category"]
+
+
+# ------------------------------------------------------ evaluation confirmation
+def test_evaluation_confirmation_requires_an_explicit_choice():
+    html = evaluation_confirmation()
+
+    assert '<dialog id="pm-evaluation-confirmation"' in html
+    assert 'aria-labelledby="pm-evaluation-confirmation-title"' in html
+    assert 'value="cancel"' in html
+    assert 'value="confirm"' in html
+    assert "Evaluate and submit this model?" in html
+    assert "update the public leaderboards" in html
+
+
+def test_evaluation_status_announces_that_scoring_is_in_progress():
+    html = evaluation_status()
+
+    assert 'class="pm-evaluation-status"' in html
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+    assert 'class="pm-spinner" aria-hidden="true"' in html
+    assert "<circle" in html
+    assert "<path" in html
+    assert "Your embeddings are being evaluated... This can take a few minutes." in html
+
+
+def test_only_public_tasks_get_a_public_chip(registry, named, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    for html in (
+        render_board(named("bulk RNA"), df, registry, private=False),
+        render_tasks(registry, private=False),
+    ):
+        assert html.count('class="pm-public-chip"') == 1
+        assert re.search(r'Psoriasis PASI</span> <span class="pm-public-chip"', html)
+
+
+# ------------------------------------------------------------------ view switch
+def _private_slugs(html: str) -> list[str]:
+    return re.findall(r'href="\?board=([^"&]+)&amp;view=private"', html)
+
+
+def _eva_skips_the_public_task(flagged_results, registry):
+    """The anchor covers every task; ``eva`` skips the public ``t904``."""
+    return flagged_results(
+        *[(ELO_ANCHOR_MODEL, tid, 0.5, "2026-01-01", True) for tid in registry],
+        *[("eva", tid, 0.8, "2026-01-01", False) for tid in registry if tid != "t904"],
+    )
+
+
+def _ranked_part(html: str) -> str:
+    return html.split("Per task")[0]
+
+
+def test_view_switch_marks_the_current_view_and_keeps_the_page(
+    registry, named, results
+):
+    html = render_board(named("bulk RNA"), results(), registry, private=True)
+    assert '<a target="_self" href="?board=bulk-rna">All tasks</a>' in html
+    assert (
+        '<a class="pm-active" aria-current="page" target="_self" '
+        'href="?board=bulk-rna&amp;view=private">Private tasks</a>'
+    ) in html
+
+
+def test_private_board_ranks_a_model_that_skipped_only_public_tasks(
+    registry, named, flagged_results
+):
+    df = _eva_skips_the_public_task(flagged_results, registry)
+    full = render_board(named("bulk RNA"), df, registry, private=False)
+    private = render_board(named("bulk RNA"), df, registry, private=True)
+    eva_ranked = '<td class="pm-name">eva</td>'
+    assert eva_ranked not in _ranked_part(full)
+    assert eva_ranked in _ranked_part(private)
+    assert "Psoriasis PASI" in full and "Psoriasis PASI" not in private
+    assert "4 tasks" in private
+
+
+def test_a_board_of_public_tasks_says_so_in_the_private_view(registry, named, results):
+    html = render_board(named("Dermatology"), results(), registry, private=True)
+    assert "Every task of this board is public." in html
+    assert "pm-table" not in html
+
+
+def test_home_cards_keep_every_board_in_the_private_view(
+    boards, registry, flagged_results
+):
+    df = _eva_skips_the_public_task(flagged_results, registry)
+    full = render_boards(boards, df, registry, private=False)
+    private = render_boards(boards, df, registry, private=True)
+    assert set(_private_slugs(private)) == set(_slugs(full))
+    assert "Every task of this board is public." in private
+    assert private.count("pm-card--open") == full.count("pm-card--open") + 1
+    assert private.count("eva") > full.count("eva")
+
+
+def test_rail_links_and_counts_follow_the_private_view(boards, registry):
+    html = rail_html(boards, registry, None, None, private=True)
+    links = re.findall(r'href="([^"]+)"', html)
+    assert links and all(link.endswith("&amp;view=private") for link in links)
+    assert (
+        'href="?board=bulk-rna&amp;view=private">'
+        '<span class="pm-label">Bulk RNAseq</span><span class="pm-count">4</span>'
+    ) in html
+
+
+def test_private_tasks_page_hides_the_public_tasks(registry):
+    html = render_tasks(registry, private=True)
+    assert "Psoriasis PASI" not in html
+    assert "4 targets" in html
+    assert 'href="?tab=tasks">All tasks</a>' in html

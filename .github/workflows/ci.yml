@@ -20,3 +20,16 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
+
+  space:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.9"
+      - run: >-
+          uv run --isolated --no-project --python 3.13
+          --with-requirements space/requirements.txt
+          --with "gradio[oauth]==5.50.0" --with pytest
+          pytest space_tests
