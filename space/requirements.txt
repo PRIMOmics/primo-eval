@@ -2,7 +2,7 @@ numpy
 pandas
 pyarrow
 joblib
-scikit-learn
+scikit-learn>=1.7,<1.10
 pyyaml
 huggingface_hub<1.0
 audioop-lts; python_version >= "3.13"

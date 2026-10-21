@@ -78,7 +78,7 @@ FOOT_LINKS = (
 NAME_COLUMNS = frozenset({"Model", "Best"})
 STRONG_COLUMNS = frozenset({"Task"})
 METRIC_COLUMNS = frozenset({"Metric"})
-RIGHT_COLUMNS = frozenset({"Rank", "Patients"})
+RIGHT_COLUMNS = frozenset({"Rank", "Patients", "Submissions count"})
 METRIC_GUIDES = {
     "AUROC": "Range: 0 to 1 · Random predictor: 0.5",
     "Pearson": "Range: -1 to 1 · Random predictor: 0 (expected)",

@@ -6,7 +6,7 @@ log2(CPM+1); single-cell data uses per-cell log2(CP10K+1), mean pooling by
 collection sample, then PCA. Replace ``embed`` with your encoder and nothing else
 changes.
 
-    pip install anndata scikit-learn pandas pyyaml huggingface_hub
+    pip install anndata scikit-learn pandas pyarrow pyyaml huggingface_hub
     python quickstart.py --modality bulk-rna --out submission.parquet
 
 Standalone on purpose: no import from this Space, so it keeps working if you
