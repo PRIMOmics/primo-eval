@@ -85,7 +85,9 @@ from results import (
     owner_of,
     read_results,
     task_rows,
+    version_rows,
 )
+from versions import CURRENT
 
 HERE = Path(__file__).parent
 PAGES_DIR = HERE / "pages"
@@ -239,7 +241,7 @@ PageState = tuple[dict[str, dict], list[Board], pd.DataFrame]
 
 
 def _page_state() -> PageState:
-    """Registry, boards and persisted results -- one fetch per render.
+    """Registry, boards and this version's results -- one fetch per render.
 
     A failed fetch yields empty structures so the page renders a "come back
     later" state instead of a stack trace. Every page is built from one of these,
@@ -247,7 +249,8 @@ def _page_state() -> PageState:
     """
     try:
         by_id = _registry_by_id()
-        return by_id, build_boards(by_id), read_results(TOKEN)
+        rows = version_rows(read_results(TOKEN), CURRENT.number)
+        return by_id, build_boards(by_id), rows
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         return {}, [], pd.DataFrame(columns=RESULT_COLUMNS)

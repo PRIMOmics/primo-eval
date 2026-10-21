@@ -206,7 +206,9 @@ day it opened, and the Hub commits its scores read: `data` in `PRIMOmics/primo`,
 this code scores.
 
 The scorer reads these commits, not the latest ones, so a push to a data repo
-changes no score until a release opens a new version. `requirements.txt` pins the
+changes no score until a release opens a new version. Each result row records
+the version that scored it, and a board shows only the rows of its version. Rows
+written before versions existed carry none, so they are shown on no board. `requirements.txt` pins the
 packages that can move a score (numpy, pandas, joblib, scikit-learn, scipy) to the
 versions the Space runs.
 
@@ -220,10 +222,12 @@ versions the Space runs.
   `<task_id>/labels.csv` and perturbation `<task_id>/targets.npz`), and **read + write** on
   `PRIMOmics/primo-results` (the persisted leaderboard).
 - Results persist as one normalized `task_results.csv` (`model_name, task_id,
-  score, repeat_scores, diagnostics, submitted_at, is_baseline, hf_username`) in the results dataset; the
+  score, repeat_scores, diagnostics, submitted_at, is_baseline, hf_username,
+  version`) in the results dataset; the
   leaderboard is recomputed from it by joining the registry, so it survives
   Space restarts.
-- A board keeps the **latest result for each `(model name, is_baseline, task)`**,
+- Among the rows of its version, a board keeps the **latest result for each
+  `(model name, is_baseline, task)`**,
   so submissions accumulate: a later one fills in the tasks it covers and leaves
   the rest standing, and resubmitting a task replaces just that result. Because a
   task belongs to exactly one modality, one name can hold bulk and single-cell
@@ -235,8 +239,8 @@ versions the Space runs.
   refused too, since model names become column headers, and so are names
   containing the `+ HVG` tag.
 - The boards show a **Submissions count** per model — the most times any one of
-  its task results was resubmitted — so a task tuned against by repeated
-  resubmission is visible. Nothing is ever blocked.
+  its task results was resubmitted in the board's version — so a task tuned
+  against by repeated resubmission is visible. Nothing is ever blocked.
 - Submitter contact metadata (HF username, email, paper / model links, notes)
   persists to a separate `submissions.csv` in the same **private** results
   dataset, and never reaches the public leaderboard.
