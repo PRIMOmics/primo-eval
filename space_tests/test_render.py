@@ -595,21 +595,54 @@ def test_rail_category_labels_use_consistent_authored_casing(boards):
     html = rail_html(boards, None, None)
     labels = re.findall(r'<p class="pm-rail-label">([^<]+)</p>', html)
 
-    assert labels == [
-        "Per modality",
-        "Per therapeutic areas",
-        "Task Category",
-        "Version",
-    ]
+    assert labels == ["Per modality", "Per therapeutic areas", "Task Category"]
 
 
-def test_the_rail_of_the_current_version_links_its_release_notes(boards):
+def _version_menu(html: str) -> str:
+    return re.search(r'<details class="pm-version">(.*?)</details>', html).group(1)
+
+
+def test_the_version_menu_sits_under_the_logo(boards):
     html = rail_html(boards, None, None)
 
-    assert f"v{CURRENT.number}" in html
-    assert f'href="{RELEASES_URL}/{CURRENT.release}"' in html
-    assert "version=" not in html
-    assert "pm-rail-notice" not in html
+    brand, menu = html.index('class="pm-brand"'), html.index('class="pm-version"')
+    assert brand < menu < html.index('class="pm-rail-section"')
+
+
+def test_the_version_menu_names_the_current_version_and_its_release_notes(boards):
+    menu = _version_menu(rail_html(boards, None, None))
+
+    assert f'Version v{CURRENT.number}</span><span class="pm-count">current' in menu
+    assert f'href="{RELEASES_URL}/{CURRENT.release}"' in menu
+    assert "version=" not in menu
+
+
+def test_the_rail_of_the_current_version_has_no_closed_notice(boards):
+    assert "pm-rail-notice" not in rail_html(boards, None, None)
+
+
+def test_the_version_menu_marks_the_version_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    menu = _version_menu(rail_html(boards, None, None, CLOSED))
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert f'Version v{CLOSED.number}</span><span class="pm-count">closed' in menu
+    assert f'class="pm-link pm-active" target="_self" href="?tab=boards{tag}"' in menu
+    assert 'class="pm-link" target="_self" href="?tab=boards"' in menu
+    assert f"from {CLOSED.opened}" in menu
+
+
+def test_a_version_switch_stays_on_the_page_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    slug, tag = boards[0].slug, f"&amp;version={CLOSED.number}"
+
+    on_board = _version_menu(rail_html(boards, slug, None))
+    on_tasks = _version_menu(rail_html(boards, None, "tasks"))
+    on_submit = _version_menu(rail_html(boards, None, "submit"))
+
+    assert f'href="?board={slug}{tag}"' in on_board
+    assert f'href="?tab=tasks{tag}"' in on_tasks
+    assert f'href="?tab=boards{tag}"' in on_submit
 
 
 def test_a_closed_version_keeps_every_rail_link_on_it_but_submit(boards, monkeypatch):

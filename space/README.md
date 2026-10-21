@@ -214,7 +214,7 @@ Each result row records the version that scored it, and a board shows only the
 rows of its version. Rows written before versions existed carry none, so they are
 shown on no board.
 
-The rail lists every version with a link to its release notes. `?version=0.1`
+A menu under the logo lists the versions and the release notes. `?version=0.1`
 opens a closed version, read-only: its registry at its pinned commits and the rows
 it scored, with a notice that links back to the current version. Every link keeps
 the version, except Submit: a submission always goes to the current version.
