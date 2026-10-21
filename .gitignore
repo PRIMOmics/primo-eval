@@ -225,3 +225,6 @@ __marimo__/
 # Claude Code personal files
 .claude/settings.local.json
 CLAUDE.local.md
+
+# Benchmark data from primo download
+primo-data/
