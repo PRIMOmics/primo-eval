@@ -1,7 +1,6 @@
 """Unit tests for the rescore tool (no network)."""
 
 import sys
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
@@ -87,6 +86,7 @@ def test_a_live_submission_is_carried_with_its_credits_tasks_and_date():
             representation=EMBEDDING,
             archive="models/s1/submission.parquet",
             task_ids=frozenset({"t901", "t902"}),
+            held=frozenset({"t901", "t902"}),
         )
     ]
     assert carries[0].credits[OWNER] == "alice"
@@ -96,12 +96,14 @@ def test_the_tasks_a_version_adds_join_the_task_set():
     carries, _ = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, {"t903"})
 
     assert carries[0].task_ids == {"t901", "t902", "t903"}
+    assert carries[0].held == {"t901", "t902"}
 
 
 def test_all_tasks_scores_every_task_of_the_file():
     carries, _ = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, set(), all_tasks=True)
 
     assert carries[0].task_ids is None
+    assert carries[0].held == {"t901", "t902"}
 
 
 def test_a_retired_task_leaves_the_task_set():
@@ -176,6 +178,7 @@ def test_the_baseline_is_carried_from_the_reference():
             representation=GENE_SPACE,
             archive=None,
             task_ids=frozenset({"t901", "t902"}),
+            held=frozenset({"t901", "t902"}),
         )
     ]
     assert carried(old, old, [], TASKS, set()) == ([], [])
@@ -316,7 +319,7 @@ def test_a_task_scored_invalid_gets_no_row_and_is_logged(tmp_path, monkeypatch, 
 
     assert {row["task_id"] for row in rows} == {"t901"}
     assert "eva: no score on t902: labelled samples missing" in caplog.text
-    assert lost_tasks(carry, rows, set()) == ["t902"]
+    assert lost_tasks(carry, rows) == ["t902"]
 
 
 SCORED = [
@@ -329,9 +332,14 @@ SCORED = [
 def test_a_held_task_without_a_row_is_lost_but_an_added_one_is_not():
     carry = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, {"t903"})[0][0]
 
-    assert lost_tasks(carry, SCORED, {"t903"}) == []
-    assert lost_tasks(carry, SCORED[:3], {"t903"}) == ["t902"]
-    assert lost_tasks(replace(carry, task_ids=None), [], set()) == []
+    assert lost_tasks(carry, SCORED) == []
+    assert lost_tasks(carry, SCORED[:3]) == ["t902"]
+
+
+def test_a_held_task_without_a_row_is_lost_with_all_tasks_too():
+    carry = carried(EVA, _rows(), [EVA_ARCHIVE], TASKS, set(), all_tasks=True)[0][0]
+
+    assert lost_tasks(carry, SCORED[:3]) == ["t902"]
 
 
 def _patch_main(monkeypatch, tmp_path, score) -> list:

@@ -19,7 +19,8 @@ the old version, on a task that still exists.
   entry from the same time or later. A second run after the deploy then only
   picks up the submissions made in between.
 - An entry that fails, or that gets no score on a task it held, stops the run
-  before anything is published. ``--models`` leaves an entry out on purpose.
+  before anything is published, with or without ``--all-tasks``. To publish the
+  others, rerun with ``--models`` and the entries to keep.
 
 ``--from legacy`` reads the rows written before versions existed.
 
@@ -89,6 +90,7 @@ class Carry:
 
     ``archive`` is the file's path in the results repo, or None for the baseline,
     whose file is the reference. ``task_ids`` None means every task of the file.
+    ``held`` are the tasks its old rows covered: each one must score again.
     """
 
     model_name: str
@@ -99,6 +101,7 @@ class Carry:
     representation: str
     archive: str | None
     task_ids: frozenset[str] | None
+    held: frozenset[str]
     credits: dict = field(default_factory=dict, compare=False)
 
 
@@ -119,12 +122,12 @@ def _held_since(rows: pd.DataFrame, model: str, is_baseline: bool, since: str) -
 
 
 def _task_set(
-    rows: pd.DataFrame, added: set[str], all_tasks: bool
+    held: frozenset[str], added: set[str], all_tasks: bool
 ) -> frozenset[str] | None:
-    """The tasks ``rows`` cover plus the added ones, or None for every task."""
+    """The held tasks plus the added ones, or None for every task."""
     if all_tasks:
         return None
-    return frozenset(rows[TASK_ID].map(_norm_id)) | frozenset(added)
+    return held | frozenset(added)
 
 
 def carried(
@@ -152,6 +155,7 @@ def carried(
         if rows.empty or _held_since(new, model, False, manifest["submitted_at"]):
             continue
         parent = rows.iloc[-1]
+        held = frozenset(rows[TASK_ID].map(_norm_id))
         carries.append(
             Carry(
                 model_name=model,
@@ -161,7 +165,8 @@ def carried(
                 modality=manifest["modality"],
                 representation=representation_of(manifest),
                 archive=archive_paths(submission_id, manifest["source_format"])[0],
-                task_ids=_task_set(rows, added, all_tasks),
+                task_ids=_task_set(held, added, all_tasks),
+                held=held,
                 credits={key: parent[key] for key in CREDITS},
             )
         )
@@ -178,6 +183,7 @@ def carried(
     if not baseline.empty:
         since = str(baseline["submitted_at"].astype(str).max())
         if not _held_since(new, HVG_REFERENCE_MODEL, True, since):
+            held = frozenset(baseline[TASK_ID].map(_norm_id))
             carries.append(
                 Carry(
                     model_name=HVG_REFERENCE_MODEL,
@@ -187,7 +193,8 @@ def carried(
                     modality=None,
                     representation=GENE_SPACE,
                     archive=None,
-                    task_ids=_task_set(baseline, added, all_tasks),
+                    task_ids=_task_set(held, added, all_tasks),
+                    held=held,
                 )
             )
     return carries, orphans
@@ -264,23 +271,19 @@ def rescore(
     return _rows(carry.model_name, None) + _rows(hvg_name(carry.model_name), reference)
 
 
-def lost_tasks(carry: Carry, rows: list[dict], added: set[str]) -> list[str]:
+def lost_tasks(carry: Carry, rows: list[dict]) -> list[str]:
     """The tasks ``carry`` held that one of its entries got no row for."""
-    if carry.task_ids is None:
-        return []
     names = [carry.model_name]
     if not carry.is_baseline:
         names.append(hvg_name(carry.model_name))
-    held = carry.task_ids - added
     lost = set()
     for name in names:
-        lost |= held - {row[TASK_ID] for row in rows if row[MODEL_NAME] == name}
+        lost |= carry.held - {row[TASK_ID] for row in rows if row[MODEL_NAME] == name}
     return sorted(lost)
 
 
 def _score_carries(
     carries: list[Carry],
-    added: set[str],
     reference: Path,
     datasets: list[dict],
     registry: list[dict],
@@ -308,7 +311,7 @@ def _score_carries(
             except (SubmissionError, EvaluatorError) as error:
                 failures.append(f"{carry.model_name}: {error}")
                 continue
-            lost = lost_tasks(carry, scored, added)
+            lost = lost_tasks(carry, scored)
             if lost:
                 failures.append(f"{carry.model_name}: no score on held tasks {lost}")
             logging.info("%s: %d rows", carry.model_name, len(scored))
@@ -396,14 +399,13 @@ def main() -> None:
             fetch_manifest(token, old_version.data),
         )
     )
-    added = task_ids - old_ids
     results = read_results(token)
     carries, orphans = carried(
         version_rows(results, "" if old_version is None else old_version.number),
         version_rows(results, CURRENT.number),
         _manifests(token),
         task_ids,
-        added,
+        task_ids - old_ids,
         args.all_tasks,
     )
     carries = [c for c in carries if args.models is None or c.model_name in args.models]
@@ -417,7 +419,6 @@ def main() -> None:
 
     rows, failures = _score_carries(
         carries,
-        added,
         fetch_hvg_reference(token),
         datasets,
         registry,
@@ -428,8 +429,8 @@ def main() -> None:
         pd.DataFrame(rows).to_csv(args.out, index=False)
     if failures:
         raise SystemExit(
-            f"{len(failures)} entries failed, so nothing is published. Fix them, "
-            "or leave them out with --models:\n" + "\n".join(failures)
+            f"Failed entries: {len(failures)}, so nothing is published. Fix them, or "
+            "rerun with --models and the entries to keep:\n" + "\n".join(failures)
         )
     if args.publish:
         append_results(rows, token)

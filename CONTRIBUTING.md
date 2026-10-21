@@ -115,8 +115,8 @@ A release that changes scores also opens a board version:
 
    The Space still runs version `0.1`, which shows only its own rows. Add
    `--dry-run` first to list the entries without scoring them. If an entry fails,
-   or gets no score on a task it held, nothing is published: fix it, or leave it
-   out with `--models`.
+   or gets no score on a task it held, nothing is published: fix it, or rerun with
+   `--models` and the entries to keep.
 4. Deploy the tag (see "Deploy the Space").
 5. Run step 3 again: it adds the submissions made before the deploy.
 
