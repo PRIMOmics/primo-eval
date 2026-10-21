@@ -185,7 +185,7 @@ receiving the L2 row normalisation applied to learned embeddings, then uses
 train-fold standardisation and the regularisation-tuned linear probe. Gene
 selection is label-blind but fit over every sample of a dataset, so this is an
 information-rich transductive reference rather than a naïve raw-count baseline
-or an expected lower bound.
+or an expected lower bound. `scripts/baselines.py` builds it from the public data.
 
 ## `+ HVG` entries
 
@@ -193,8 +193,9 @@ Every Space submission is scored a second time concatenated with the
 `HVG-1200-genes` features and stored as `<model> + HVG`, with the parent's
 owner, credits and `submission_id`. The features are kept privately at
 `baselines/HVG-1200-genes/submission.parquet` in `PRIMOmics/primo-results`.
-The reference is pinned by the board version. A new reference opens a new
-version, and the rescore below scores every `+ HVG` entry again with it.
+`scripts/baselines.py --publish` uploads them. The reference is pinned by the board
+version. A new reference opens a new version, and the rescore below scores every
+`+ HVG` entry again with it.
 
 ## Board versions
 
