@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 import pandas as pd
 from boards import build_boards
 from render import render_boards
+from versions import CURRENT
 
 from .conftest import REGISTRY
 
@@ -252,3 +253,14 @@ def test_the_interface_builds_as_on_the_space():
         env={**os.environ, **space_env},
         check=True,
     )
+
+
+def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
+    monkeypatch.setattr(app, "_registry_by_id", lambda: dict(REGISTRY))
+    ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))
+    ledger["version"] = ["", CURRENT.number]
+    monkeypatch.setattr(app, "read_results", lambda token: ledger)
+
+    _, _, rows = app._page_state()
+
+    assert list(rows["model_name"]) == ["current"]
