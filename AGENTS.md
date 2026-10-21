@@ -23,6 +23,7 @@ uv run ruff format
   their reader.
 - `src/primomics/data.py`: downloads the benchmark data from the Hub, records it in
   `primo-lock.json`, and checks a submission file against it.
+- `src/primomics/submit.py`: sends a submission file to the leaderboard Space.
 - `src/primomics/cli.py`: the `primo` command.
 - `src/primomics/errors.py`: `SubmissionError` (the submitter fixes it) and
   `EvaluatorError` (we fix it).

@@ -3,9 +3,10 @@
 ``primo download`` fetches the datasets of one modality from the Hub, with the
 labels of its public tasks. ``primo evaluate`` checks a submission file against
 that data, then scores the public tasks it covers with the leaderboard protocol.
-Exit codes: 0 when the command succeeds, 1 when the input must be fixed
-(``SubmissionError``), 2 when the failure is on our side (``EvaluatorError`` or an
-unexpected error).
+``primo submit`` checks the file the same way, then sends it to the leaderboard
+Space, which scores every task. Exit codes: 0 when the command succeeds, 1 when
+the input must be fixed (``SubmissionError``), 2 when the failure is on our side
+(``EvaluatorError`` or an unexpected error).
 """
 
 import argparse
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import NoReturn
 
 import numpy as np
+from huggingface_hub import get_token
 
 from primomics import __version__
 from primomics.data import (
@@ -25,6 +27,7 @@ from primomics.data import (
     DEFAULT_DATA_DIR,
     OK,
     Download,
+    changed_datasets,
     check_submission,
     download,
     labelled_tasks,
@@ -35,6 +38,7 @@ from primomics.data import (
 from primomics.errors import EvaluatorError, SubmissionError
 from primomics.evaluate import MODALITIES, TASK_ID, manifest_ids, score_all
 from primomics.submission import DATASET_ID, norm_id
+from primomics.submit import PUBLISHED, REFUSED, SPACE, submit
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
 logger = logging.getLogger(__name__)
@@ -196,10 +200,8 @@ def _report(
     }
 
 
-def _evaluate(args: argparse.Namespace) -> None:
-    """Run ``primo evaluate``."""
-    if args.output and not Path(args.output).parent.is_dir():
-        raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
+def _checked(args: argparse.Namespace) -> tuple[dict[str, str], list[dict]]:
+    """Check the submission file: stop on a failed dataset, warn about absent ones."""
     verdicts = check_submission(args.submission, args.data_dir, args.modality)
     _log_checks(verdicts)
     failed = sorted(
@@ -214,6 +216,14 @@ def _evaluate(args: argparse.Namespace) -> None:
             "missing from the file, their tasks count as missing on submit: %s",
             ", ".join(absent),
         )
+    return verdicts, manifest
+
+
+def _evaluate(args: argparse.Namespace) -> None:
+    """Run ``primo evaluate``."""
+    if args.output and not Path(args.output).parent.is_dir():
+        raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
+    verdicts, manifest = _checked(args)
     tasks = _public_tasks(manifest, args.modality)
     scored = labelled_tasks(args.data_dir, tasks)
     unlabelled = [
@@ -237,6 +247,48 @@ def _evaluate(args: argparse.Namespace) -> None:
         report = _report(args, manifest, verdicts, scored, unlabelled, result)
         Path(args.output).write_text(json.dumps(report, indent=2))
         logger.info("Wrote %s.", args.output)
+
+
+def _submit(args: argparse.Namespace) -> None:
+    """Run ``primo submit``."""
+    verdicts, manifest = _checked(args)
+    in_file = [entry for entry in manifest if norm_id(entry["id"]) in verdicts]
+    changed = changed_datasets(args.data_dir, in_file)
+    if changed:
+        raise SubmissionError(
+            f"the data of {changed} changed on the Hub since your download: run "
+            "primo download, then embed these datasets again"
+        )
+    token = get_token()
+    if not token:
+        raise SubmissionError("no Hugging Face token: run `hf auth login` first")
+    if args.dry_run:
+        logger.info("Dry run: %s is ready to submit.", args.submission)
+        return
+    logger.info(
+        "Submitting %s to %s. Scoring takes a few minutes.",
+        args.submission,
+        args.space,
+    )
+    reply = submit(
+        args.submission,
+        token=token,
+        modality=args.modality,
+        model_name=args.model_name,
+        email=args.email,
+        institution=args.institution,
+        authors=args.authors,
+        paper_link=args.paper_link,
+        hf_model_link=args.hf_model,
+        notes=args.notes,
+        space=args.space,
+    )
+    logger.info("%s", reply["message"])
+    if reply["status"] == REFUSED:
+        raise SubmissionError("the Space refused the submission")
+    if reply["status"] != PUBLISHED:
+        raise EvaluatorError("the Space could not publish the submission")
+    logger.info("Submission id: %s", reply["submission_id"])
 
 
 def _add_data_dir(command: argparse.ArgumentParser, verb: str) -> None:
@@ -285,6 +337,45 @@ def _parser() -> argparse.ArgumentParser:
     _add_data_dir(score, "read")
     score.add_argument("-o", "--output", help="write the results to this JSON file")
     score.set_defaults(run=_evaluate)
+
+    send = commands.add_parser(
+        "submit",
+        help="send a submission file to the leaderboard",
+        description=(
+            "Check a submission file, then send it to the leaderboard Space, which "
+            "scores every task and publishes the scores. It needs a Hugging Face "
+            "login: run `hf auth login` once."
+        ),
+    )
+    send.add_argument("submission", help="a .parquet, .csv, .tsv or .npz file")
+    send.add_argument("--modality", required=True, choices=sorted(MODALITIES))
+    send.add_argument(
+        "--model-name", required=True, help="the name shown on the leaderboard"
+    )
+    send.add_argument(
+        "--email", required=True, help="a contact for this submission, kept private"
+    )
+    send.add_argument("--institution", default="", help="shown on the leaderboard")
+    send.add_argument(
+        "--authors", action="store_true", help="the model's authors submit it"
+    )
+    send.add_argument(
+        "--paper-link", default="", help="links the model name on the leaderboard"
+    )
+    send.add_argument(
+        "--hf-model", default="", help="the model's page on the Hugging Face Hub"
+    )
+    send.add_argument(
+        "--notes", default="", help="about the model or its training data"
+    )
+    send.add_argument(
+        "--dry-run", action="store_true", help="run every check, send nothing"
+    )
+    send.add_argument(
+        "--space", default=SPACE, help=f"the leaderboard Space (default: {SPACE})"
+    )
+    _add_data_dir(send, "read")
+    send.set_defaults(run=_submit)
     return parser
 
 

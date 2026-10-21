@@ -167,8 +167,10 @@ def _update_lock(data_dir: Path, revision: str, files: Iterable[RepoFile]) -> No
     (data_dir / LOCK_FILE).write_text(json.dumps(lock, indent=2, sort_keys=True))
 
 
-def _repo_files(api: HfApi, revision: str, patterns: list[str]) -> list[RepoFile]:
-    """The files of the data repo at ``revision`` that match ``patterns``."""
+def _repo_files(
+    api: HfApi, revision: str | None, patterns: list[str]
+) -> list[RepoFile]:
+    """The files of the data repo matching ``patterns``, at ``revision`` or latest."""
     tree = api.list_repo_tree(
         DATA_REPO, recursive=True, revision=revision, repo_type=REPO_TYPE
     )
@@ -398,3 +400,22 @@ def locked_files(
         for path, entry in files.items()
         if path == DATASETS_MANIFEST or path.startswith(prefixes)
     }
+
+
+def changed_datasets(data_dir: str | Path, datasets: list[dict]) -> list[str]:
+    """The datasets whose ``expression.h5ad`` is not the one on the Hub today.
+
+    A dataset missing from the lock counts as changed: nothing proves its file is
+    the latest one.
+    """
+    files = read_lock(data_dir).get("files", {})
+    paths = [entry["path"] for entry in datasets]
+    with _hub_errors():
+        latest = {
+            file.path: _file_hash(file) for file in _repo_files(HfApi(), None, paths)
+        }
+    return [
+        norm_id(entry["id"])
+        for entry in datasets
+        if files.get(entry["path"], {}).get("hash") != latest.get(entry["path"])
+    ]

@@ -48,6 +48,22 @@ missing from the file are listed too: on submit, their tasks count as missing.
 `results.json` holds every score, with the version of `primomics` and the hashes of
 the data files.
 
+Submit the file to the leaderboard, after one `hf auth login`:
+
+```bash
+primo submit submission.parquet --modality bulk-rna \
+  --model-name my-model --email me@lab.org
+```
+
+`primo submit` runs the checks of `primo evaluate`, and checks that each dataset of
+the file is still the latest one on the Hub. It then sends the file to the
+[leaderboard Space](https://huggingface.co/spaces/PRIMOmics/primo-eval), which scores
+every task, the private ones included, and publishes the scores. Scoring takes a few
+minutes. The Space reads your Hugging Face token only to know who submits: a model
+name stays with the account that first used it. `--dry-run` runs every check and
+sends nothing. `--institution`, `--authors`, `--paper-link`, `--hf-model` and
+`--notes` fill the other fields of the web form.
+
 ## Development
 
 With [uv](https://docs.astral.sh/uv/), which also installs Python 3.12 if needed:
