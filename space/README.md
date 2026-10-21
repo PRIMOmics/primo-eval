@@ -206,11 +206,13 @@ day it opened, and the Hub commits its scores read: `data` in `PRIMOmics/primo`,
 this code scores.
 
 The scorer reads these commits, not the latest ones, so a push to a data repo
-changes no score until a release opens a new version. Each result row records
-the version that scored it, and a board shows only the rows of its version. Rows
-written before versions existed carry none, so they are shown on no board. `requirements.txt` pins the
+changes no score until a release opens a new version. `requirements.txt` pins the
 packages that can move a score (numpy, pandas, joblib, scikit-learn, scipy) to the
 versions the Space runs.
+
+Each result row records the version that scored it, and a board shows only the
+rows of its version. Rows written before versions existed carry none, so they are
+shown on no board.
 
 ## Space configuration
 
