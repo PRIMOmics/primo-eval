@@ -137,6 +137,13 @@ footer { display: none !important; }
 }
 #pm-rail .pm-foot-link:hover { background: var(--sidebar-highlight) !important; color: #fff !important; }
 #pm-rail .pm-foot-link.pm-active { background: var(--sidebar-accent) !important; color: #fff !important; }
+.pm-rail-foot .pm-rail-label { margin-top: 8px; }
+
+.pm-rail-notice { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 10px 12px;
+  border: 1px solid var(--coral-500); border-radius: var(--radius-md); font: 400 13px/1.4 var(--font-sans); }
+#pm-rail .pm-rail-notice b { color: #fff !important; font-weight: 600; }
+#pm-rail .pm-rail-notice span { color: var(--sidebar-sub-fg) !important; }
+#pm-rail .pm-rail-notice a { color: #fff !important; text-decoration: underline; }
 
 /* ---------- page shell ---------- */
 #pm-main { min-width: 0; background: var(--surface-base, #fff); }

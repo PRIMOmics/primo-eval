@@ -14,6 +14,7 @@ import render
 from boards import AREA_GROUP, GROUP_NOTE, MODALITY_GROUP, build_boards, open_in_group
 from leaderboard import ELO_ANCHOR_MODEL
 from render import (
+    RELEASES_URL,
     SECTIONS,
     evaluation_confirmation,
     evaluation_status,
@@ -22,6 +23,9 @@ from render import (
     render_boards,
     render_tasks,
 )
+from versions import CURRENT
+
+from .conftest import CLOSED
 
 
 def _slugs(html: str) -> list[str]:
@@ -591,7 +595,59 @@ def test_rail_category_labels_use_consistent_authored_casing(boards):
     html = rail_html(boards, None, None)
     labels = re.findall(r'<p class="pm-rail-label">([^<]+)</p>', html)
 
-    assert labels == ["Per modality", "Per therapeutic areas", "Task Category"]
+    assert labels == [
+        "Per modality",
+        "Per therapeutic areas",
+        "Task Category",
+        "Version",
+    ]
+
+
+def test_the_rail_of_the_current_version_links_its_release_notes(boards):
+    html = rail_html(boards, None, None)
+
+    assert f"v{CURRENT.number}" in html
+    assert f'href="{RELEASES_URL}/{CURRENT.release}"' in html
+    assert "version=" not in html
+    assert "pm-rail-notice" not in html
+
+
+def test_a_closed_version_keeps_every_rail_link_on_it_but_submit(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    html = rail_html(boards, None, "tasks", CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert set(_slugs(html.replace(tag, ""))) == {b.slug for b in boards}
+    for slug in _slugs(html.replace(tag, "")):
+        assert f'href="?board={slug}{tag}"' in html
+    assert f'href="?tab=tasks{tag}"' in html
+    assert 'href="?tab=submit"' in html
+    assert f'href="{RELEASES_URL}/{CLOSED.release}"' in html
+
+
+def test_a_closed_version_says_when_it_closed_and_links_the_current_one(
+    boards, monkeypatch
+):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, CLOSED),
+    ).group(1)
+
+    assert f"from {CLOSED.opened} to {CURRENT.opened}" in notice
+    assert f'href="?tab=boards">Go to the current version, v{CURRENT.number}' in notice
+
+
+def test_the_cards_of_a_closed_version_keep_it(boards, registry, results, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    html = render_boards(boards, df, registry, CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert {slug.removesuffix(tag) for slug in _slugs(html)} == {b.slug for b in boards}
+    assert all(slug.endswith(tag) for slug in _slugs(html))
+    assert f'href="?tab=contribute{tag}"' in html
 
 
 # ------------------------------------------------------ evaluation confirmation

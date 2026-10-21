@@ -12,7 +12,7 @@ from boards import build_boards
 from render import render_boards
 from versions import CURRENT
 
-from .conftest import REGISTRY
+from .conftest import CLOSED, REGISTRY
 
 previous_gradio = sys.modules.get("gradio")
 gradio_stub = ModuleType("gradio")
@@ -174,17 +174,17 @@ def test_submission_without_valid_scores_is_not_claimed_or_persisted(monkeypatch
 
 def test_registry_flags_the_public_tasks(monkeypatch):
     monkeypatch.delenv("PRIMO_FIXTURE", raising=False)
-    monkeypatch.setattr(app, "fetch_manifest", lambda token: [{"id": "d901"}])
+    monkeypatch.setattr(app, "fetch_manifest", lambda token, revision: [{"id": "d901"}])
     monkeypatch.setattr(
         app,
         "fetch_tasks_registry",
-        lambda token: [
+        lambda token, revision: [
             {"task_id": "t901", "dataset_id": "d901"},
             {"task_id": "t902", "dataset_id": "d901"},
         ],
     )
-    monkeypatch.setattr(app, "fetch_public_task_ids", lambda token: {"t902"})
-    registry = app._registry_by_id()
+    monkeypatch.setattr(app, "fetch_public_task_ids", lambda token, revision: {"t902"})
+    registry = app._registry_by_id(CURRENT)
     assert registry["t901"]["public"] is False
     assert registry["t902"]["public"] is True
 
@@ -193,7 +193,9 @@ def test_overview_renders_from_the_state_init_hands_over(monkeypatch):
     by_id = {task_id: dict(task) for task_id, task in REGISTRY.items()}
     boards = build_boards(by_id)
     df = _ledger(("eva", "alice", "t901"), ("eva", "alice", "t902"))
-    monkeypatch.setattr(app, "_page_state", lambda: (by_id, boards, df))
+    monkeypatch.setattr(
+        app, "_page_state", lambda version: (by_id, boards, df, version)
+    )
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
 
     state = app._init(None)[3]
@@ -256,11 +258,51 @@ def test_the_interface_builds_as_on_the_space():
 
 
 def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
-    monkeypatch.setattr(app, "_registry_by_id", lambda: dict(REGISTRY))
+    monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))
     ledger["version"] = ["", CURRENT.number]
     monkeypatch.setattr(app, "read_results", lambda token: ledger)
 
-    _, _, rows = app._page_state()
+    _, _, rows, version = app._page_state()
 
     assert list(rows["model_name"]) == ["current"]
+    assert version == CURRENT
+
+
+def test_a_visitor_can_ask_for_a_closed_version(monkeypatch):
+    monkeypatch.setattr(app, "VERSIONS", [CURRENT, CLOSED])
+
+    assert app._viewed_version({"version": CLOSED.number}) == CLOSED
+    assert app._viewed_version({"version": "9.9"}) == CURRENT
+    assert app._viewed_version({}) == CURRENT
+
+
+def test_submit_always_shows_the_current_version(monkeypatch):
+    monkeypatch.setattr(app, "VERSIONS", [CURRENT, CLOSED])
+
+    params = {"version": CLOSED.number, "tab": "submit"}
+
+    assert app._viewed_version(params) == CURRENT
+
+
+def test_a_closed_version_reads_its_commits_and_its_rows(monkeypatch):
+    monkeypatch.delenv("PRIMO_FIXTURE", raising=False)
+    revisions = []
+
+    def fetch(value):
+        return lambda token, revision: revisions.append(revision) or value
+
+    monkeypatch.setattr(app, "fetch_manifest", fetch([{"id": "d901"}]))
+    tasks = [{"task_id": "t901", "dataset_id": "d901"}]
+    monkeypatch.setattr(app, "fetch_tasks_registry", fetch(tasks))
+    monkeypatch.setattr(app, "fetch_public_task_ids", fetch(set()))
+    ledger = _ledger(("old", "alice", "t901"), ("new", "bob", "t901"))
+    ledger["version"] = [CLOSED.number, CURRENT.number]
+    monkeypatch.setattr(app, "read_results", lambda token: ledger)
+
+    by_id, _, rows, version = app._page_state(CLOSED)
+
+    assert revisions == [CLOSED.data, CLOSED.labels, CLOSED.data]
+    assert list(by_id) == ["t901"]
+    assert list(rows["model_name"]) == ["old"]
+    assert version == CLOSED
