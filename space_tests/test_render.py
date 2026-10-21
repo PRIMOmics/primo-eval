@@ -7,6 +7,7 @@ value, provenance never leaks, and public submission credits are safely escaped.
 """
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -670,6 +671,18 @@ def test_a_closed_version_says_when_it_closed_and_links_the_current_one(
 
     assert f"from {CLOSED.opened} to {CURRENT.opened}" in notice
     assert f'href="?tab=boards">Go to the current version, v{CURRENT.number}' in notice
+
+
+def test_a_version_that_closed_the_day_it_opened_says_so(boards, monkeypatch):
+    same_day = replace(CLOSED, opened=CURRENT.opened)
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, same_day])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, same_day),
+    ).group(1)
+
+    assert f"from {CURRENT.opened} to {CURRENT.opened}" in notice
 
 
 def test_the_cards_of_a_closed_version_keep_it(boards, registry, results, monkeypatch):
