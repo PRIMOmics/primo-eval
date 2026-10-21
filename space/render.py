@@ -157,13 +157,29 @@ def _closed_notice(version: Version) -> str:
     )
 
 
-def _versions_html(version: Version) -> str:
-    """Every board version, then the release notes of the one on screen."""
-    parts = ['<p class="pm-rail-label">Version</p>']
+def _page_query(active_slug: str | None, active_tab: str | None) -> str:
+    """The page on screen, so a version switch stays on it; Submit goes to Boards."""
+    if active_slug:
+        return f"board={active_slug}"
+    if active_tab and active_tab != "submit":
+        return f"tab={active_tab}"
+    return "tab=boards"
+
+
+def _version_menu(version: Version, page: str) -> str:
+    """The dropdown under the logo: every version, then the release notes."""
+    state = "current" if version == CURRENT else "closed"
+    parts = [
+        '<details class="pm-version"><summary class="pm-version-summary">'
+        f'<span class="pm-label">Version v{escape(version.number)}</span>'
+        f'<span class="pm-count">{state}</span>{CHEVRON}</summary>',
+        '<div class="pm-version-list">',
+    ]
     for listed in VERSIONS:
+        cls = "pm-link pm-active" if listed == version else "pm-link"
         note = "current" if listed == CURRENT else f"from {listed.opened}"
         parts.append(
-            f'<a class="pm-link" target="_self" href="{_href("tab=boards", listed)}">'
+            f'<a class="{cls}" target="_self" href="{_href(page, listed)}">'
             f'<span class="pm-label">v{escape(listed.number)}</span>'
             f'<span class="pm-count">{escape(note)}</span></a>'
         )
@@ -171,7 +187,7 @@ def _versions_html(version: Version) -> str:
     parts.append(
         f'<a class="pm-link" target="_blank" rel="noopener" href="{notes}">'
         '<span class="pm-label">Release notes</span>'
-        f'<span class="pm-count">{escape(version.release)}</span></a>'
+        f'<span class="pm-count">{escape(version.release)}</span></a></div></details>'
     )
     return "".join(parts)
 
@@ -182,7 +198,7 @@ def rail_html(
     active_tab: str | None,
     version: Version = CURRENT,
 ) -> str:
-    """The left navigation: brand, a collapsible "Boards" menu, then the foot links.
+    """The left navigation: brand, version menu, "Boards" menu, then the foot links.
 
     The board groups live inside a ``<details>`` toggle so the four foot links
     (Tasks, Submit, Contribute, Method) stay visible without scrolling. The toggle
@@ -191,13 +207,15 @@ def rail_html(
     ``active_slug`` highlights the board a visitor is on; ``active_tab`` highlights
     a foot link, and its absence means we are on a board or the overview, so the
     "Boards" menu is the active one. Open boards link to Contribute, mirroring the
-    overview cards. ``version`` is the board version on screen.
+    overview cards. ``version`` is the board version on screen; the version menu
+    under the brand switches it and stays on the same page.
     """
     on_boards = active_tab is None
     summary_cls = "pm-rail-summary pm-active" if on_boards else "pm-rail-summary"
     parts = [
         '<div class="pm-rail-inner">',
         _brand(version),
+        _version_menu(version, _page_query(active_slug, active_tab)),
         _closed_notice(version),
         '<details class="pm-rail-section" open>',
         f'<summary class="{summary_cls}"><span>Boards</span>{CHEVRON}</summary>',
@@ -234,7 +252,6 @@ def rail_html(
         parts.append(
             f'<a class="{cls}" target="_self" href="{href}">{escape(label)}</a>'
         )
-    parts.append(_versions_html(version))
     parts.append("</div></div>")
     return "".join(parts)
 
