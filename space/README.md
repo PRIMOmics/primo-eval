@@ -193,8 +193,8 @@ Every Space submission is scored a second time concatenated with the
 `HVG-1200-genes` features and stored as `<model> + HVG`, with the parent's
 owner, credits and `submission_id`. The features are kept privately at
 `baselines/HVG-1200-genes/submission.parquet` in `PRIMOmics/primo-results`.
-When the reference changes, the `+ HVG` entry of every live archived submission
-is scored again, so each one follows the current reference.
+The reference is pinned by the board version. A new reference opens a new
+version, and the rescore below scores every `+ HVG` entry again with it.
 
 ## Board versions
 
@@ -218,6 +218,13 @@ A menu under the logo lists the versions and the release notes. `?version=0.1`
 opens a closed version, read-only: its registry at its pinned commits and the rows
 it scored, with a notice that links back to the current version. Every link keeps
 the version, except Submit: a submission always goes to the current version.
+
+When a release opens a new version, `rescore.py` fills its board from the archived
+embedding files of the previous version, so nobody has to submit again. Each live
+submission is scored again, plain and `+ HVG`, and keeps its name, credits,
+submission id and date. The `HVG-1200-genes` baseline is scored again from the
+reference features. An entry keeps its tasks, plus the tasks the new version adds.
+The release steps are in `CONTRIBUTING.md`.
 
 ## Space configuration
 
