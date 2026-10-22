@@ -136,11 +136,10 @@ The tasks listed in `public_tasks/manifest.yaml` of the data repo have
 downloadable labels. They are tagged **Public** in the task tables and are
 scored like every other task.
 
-The Boards, Board and Tasks pages carry an **All tasks / Private tasks** switch.
-The private view, `&view=private`, leaves the public tasks out: boards are
-re-ranked on their private tasks only, and every link keeps the view. The home
-cards stay the full list of boards, so a board whose tasks are all public says
-so instead of disappearing. All tasks is the default.
+A board that mixes public and private tasks has an **Only private tasks**
+checkbox, below **Include models + HVG**. Ticking it re-ranks the board on its
+private tasks only, without a page reload. It is unticked by default. The home
+page, the rail and the Tasks page always show every task.
 
 ## Make a submission
 
@@ -164,7 +163,8 @@ export HF_TOKEN=...   # read access to the PRIMO datasets
 python evaluator.py --modality bulk-rna --submission my_embeddings.parquet
 ```
 
-Long local runs can be resumed task by task with `--checkpoint-dir PATH`.
+It reads the data commits of the current board version (see "Board versions"
+below). Long local runs can be resumed task by task with `--checkpoint-dir PATH`.
 Checkpoints are namespaced by the submission contents, representation,
 reference features and scoring configuration, and are invalidated when private
 task inputs change.
@@ -196,6 +196,29 @@ owner, credits and `submission_id`. The features are kept privately at
 When the reference changes, the `+ HVG` entry of every live archived submission
 is scored again, so each one follows the current reference.
 
+## Board versions
+
+A board version is a minor release of primo-eval: version `0.1` is scored by the
+`v0.1.x` releases. `versions.yaml` lists every version with its release tag, the
+day it opened, and the Hub commits its scores read: `data` in `PRIMOmics/primo`,
+`labels` in `PRIMOmics/primo-labels`, and `reference`, the commit of
+`PRIMOmics/primo-results` that holds the HVG features. `current` is the version
+this code scores.
+
+The scorer reads these commits, not the latest ones, so a push to a data repo
+changes no score until a release opens a new version. `requirements.txt` pins the
+packages that can move a score (numpy, pandas, joblib, scikit-learn, scipy) to the
+versions the Space runs.
+
+Each result row records the version that scored it, and a board shows only the
+rows of its version. Rows written before versions existed carry none, so they are
+shown on no board.
+
+A menu under the logo lists the versions and the release notes. `?version=0.1`
+opens a closed version, read-only: its registry at its pinned commits and the rows
+it scored, with a notice that links back to the current version. Every link keeps
+the version, except Submit: a submission always goes to the current version.
+
 ## Space configuration
 
 - **`hf_oauth: true`** (set above) turns on the Submit tab's *Sign in with
@@ -206,10 +229,12 @@ is scored again, so each one follows the current reference.
   `<task_id>/labels.csv` and perturbation `<task_id>/targets.npz`), and **read + write** on
   `PRIMOmics/primo-results` (the persisted leaderboard).
 - Results persist as one normalized `task_results.csv` (`model_name, task_id,
-  score, repeat_scores, diagnostics, submitted_at, is_baseline, hf_username`) in the results dataset; the
+  score, repeat_scores, diagnostics, submitted_at, is_baseline, hf_username,
+  version`) in the results dataset; the
   leaderboard is recomputed from it by joining the registry, so it survives
   Space restarts.
-- A board keeps the **latest result for each `(model name, is_baseline, task)`**,
+- Among the rows of its version, a board keeps the **latest result for each
+  `(model name, is_baseline, task)`**,
   so submissions accumulate: a later one fills in the tasks it covers and leaves
   the rest standing, and resubmitting a task replaces just that result. Because a
   task belongs to exactly one modality, one name can hold bulk and single-cell
@@ -221,8 +246,8 @@ is scored again, so each one follows the current reference.
   refused too, since model names become column headers, and so are names
   containing the `+ HVG` tag.
 - The boards show a **Submissions count** per model — the most times any one of
-  its task results was resubmitted — so a task tuned against by repeated
-  resubmission is visible. Nothing is ever blocked.
+  its task results was resubmitted in the board's version — so a task tuned
+  against by repeated resubmission is visible. Nothing is ever blocked.
 - Submitter contact metadata (HF username, email, paper / model links, notes)
   persists to a separate `submissions.csv` in the same **private** results
   dataset, and never reaches the public leaderboard.

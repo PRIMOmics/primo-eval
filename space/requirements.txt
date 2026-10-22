@@ -1,8 +1,9 @@
-numpy
-pandas
+numpy==2.5.4
+pandas==2.3.3
 pyarrow
-joblib
-scikit-learn>=1.7,<1.10
+joblib==1.6.0
+scikit-learn==1.9.1
+scipy==1.18.1
 pyyaml
 huggingface_hub<1.0
 audioop-lts; python_version >= "3.13"
