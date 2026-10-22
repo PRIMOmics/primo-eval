@@ -203,6 +203,20 @@ def test_overview_renders_from_the_state_init_hands_over(monkeypatch):
     assert app._render_overview(state) == (render_boards(boards, df, by_id), None)
 
 
+def test_only_the_board_page_renders_a_board(monkeypatch, registry, boards):
+    empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
+    monkeypatch.setattr(
+        app, "_page_state", lambda version: (registry, boards, empty, version)
+    )
+    monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
+
+    on_tasks = app._init(SimpleNamespace(query_params={"tab": "tasks"}))
+    on_board = app._init(SimpleNamespace(query_params={"board": "bulk-rna"}))
+
+    assert on_tasks[-1] == ""
+    assert "<h1>Bulk RNAseq</h1>" in on_board[-1]
+
+
 def test_submission_also_saves_its_hvg_concatenation_entry(monkeypatch):
     persisted = []
 

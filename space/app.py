@@ -498,8 +498,9 @@ def _viewed_version(params: dict) -> Version:
 def _init(request: gr.Request):
     """Render every page but Boards from one fetch, landing where the query asks.
 
-    The fetched state is returned too, so ``_render_overview`` builds Boards from
-    it without a second round trip.
+    Navigation reloads the page, so the Board page is rendered only when a visitor
+    lands on it. The fetched state is returned too, so ``_render_overview`` builds
+    Boards from it without a second round trip.
     """
     params = dict(request.query_params) if request else {}
     state = _page_state(_viewed_version(params))
@@ -515,7 +516,7 @@ def _init(request: gr.Request):
         state,
         render_tasks(by_id),
         _about_text(by_id),
-        render_board(board, df, by_id),
+        render_board(board, df, by_id) if selected == "board" else "",
     )
 
 
