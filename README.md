@@ -1,6 +1,6 @@
 # 🧬 primo-eval
 
-PRIMO is a benchmark evaluating representations of biological foundation models on
+PRIMO is a benchmark evaluating representations of omics foundation models on
 real-world clinical tasks such as treatment outcome, clinical score, endotype and
 perturbation response.
 
