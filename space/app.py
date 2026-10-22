@@ -6,7 +6,8 @@ do I enter?"), Contribute ("what is missing, and how do I add it?"), Method
 ("can I trust this?"). Every page is addressable -- ``?board=<slug>`` opens a
 board and ``?tab=contribute`` opens a tab -- which is what the rail links and the
 open cards use. The tab strip is hidden in CSS; the rail is the navigation.
-``&view=private`` leaves the public tasks out of the boards and the Tasks page.
+``&version=<number>`` shows a closed board version, read-only: its registry at
+its pinned commits and the rows it scored. Submit always shows the current one.
 
 Choose one modality and upload its embedding file (rows keyed by ``dataset_id``
 + ``sample_id``); a fixed task probe scores each task (a dataset may carry
@@ -62,8 +63,7 @@ from evaluator import (
 )
 from leaderboard import RESERVED_COLUMNS, source_repositories
 from render import (
-    PRIVATE_VIEW,
-    VIEW_PARAM,
+    VERSION_PARAM,
     evaluation_confirmation,
     evaluation_status,
     rail_html,
@@ -88,7 +88,9 @@ from results import (
     owner_of,
     read_results,
     task_rows,
+    version_rows,
 )
+from versions import CURRENT, VERSIONS, Version
 
 HERE = Path(__file__).parent
 PAGES_DIR = HERE / "pages"
@@ -219,8 +221,8 @@ def _download_help(modality: str | None) -> str:
     )
 
 
-def _registry_by_id() -> dict[str, dict]:
-    """Scoreable tasks keyed by task_id, flagged ``public`` when their labels are.
+def _registry_by_id(version: Version) -> dict[str, dict]:
+    """The scoreable tasks of ``version`` by task_id, flagged ``public`` if so.
 
     ``PRIMO_FIXTURE=1`` swaps the token-gated fetch for the test registry, so the
     app runs offline for local smoke-testing.
@@ -229,31 +231,32 @@ def _registry_by_id() -> dict[str, dict]:
         from conftest import REGISTRY
 
         return {task_id: dict(task) for task_id, task in REGISTRY.items()}
-    datasets = manifest_ids(fetch_manifest(TOKEN))
-    registry = scoreable_tasks(fetch_tasks_registry(TOKEN), datasets)
+    datasets = manifest_ids(fetch_manifest(TOKEN, version.data))
+    registry = scoreable_tasks(fetch_tasks_registry(TOKEN, version.labels), datasets)
     by_id = {_norm_id(task["task_id"]): task for task in registry}
-    public = fetch_public_task_ids(TOKEN)
+    public = fetch_public_task_ids(TOKEN, version.data)
     return {
         task_id: {**task, PUBLIC: task_id in public} for task_id, task in by_id.items()
     }
 
 
-PageState = tuple[dict[str, dict], list[Board], pd.DataFrame]
+PageState = tuple[dict[str, dict], list[Board], pd.DataFrame, Version]
 
 
-def _page_state() -> PageState:
-    """Registry, boards and persisted results -- one fetch per render.
+def _page_state(version: Version = CURRENT) -> PageState:
+    """Registry, boards and results of ``version`` -- one fetch per render.
 
     A failed fetch yields empty structures so the page renders a "come back
     later" state instead of a stack trace. Every page is built from one of these,
     threaded through rather than refetched, so a page load is one round trip.
     """
     try:
-        by_id = _registry_by_id()
-        return by_id, build_boards(by_id), read_results(TOKEN)
+        by_id = _registry_by_id(version)
+        rows = version_rows(read_results(TOKEN), version.number)
+        return by_id, build_boards(by_id), rows, version
     except Exception:  # noqa: BLE001
         traceback.print_exc()
-        return {}, [], pd.DataFrame(columns=RESULT_COLUMNS)
+        return {}, [], pd.DataFrame(columns=RESULT_COLUMNS), version
 
 
 def _about_text(by_id: dict[str, dict]) -> str:
@@ -329,10 +332,10 @@ def _score_with_hvg(submission_path: str, modality: str) -> dict | None:
         return None
 
 
-def _rendered_board(slug: str | None, private: bool) -> str:
+def _rendered_board(slug: str | None) -> str:
     """The Board page for ``slug`` -- re-rendered after a submission saves."""
-    by_id, boards, df = _page_state()
-    return render_board(by_slug(boards, slug), df, by_id, private)
+    by_id, boards, df, _ = _page_state()
+    return render_board(by_slug(boards, slug), df, by_id)
 
 
 def evaluate(
@@ -346,11 +349,10 @@ def evaluate(
     hf_model_link: str,
     notes: str,
     slug: str | None,
-    private: bool,
     profile: gr.OAuthProfile | None,
 ):
     def _refuse(message: str):
-        return message, _rendered_board(slug, private)
+        return message, _rendered_board(slug)
 
     if profile is None:
         return _refuse("Please sign in with Hugging Face to submit.")
@@ -418,7 +420,7 @@ def evaluate(
             "\n\n⚠️ No valid scores were produced, so the model was not added to "
             "any board."
         )
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
 
     hvg_result = _score_with_hvg(submission_path, modality)
     hvg_rows = (
@@ -454,13 +456,13 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ scored, but the embedding archive was not saved: {error}"
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
     try:
         append_results(rows, TOKEN)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ archived, but the leaderboard was not saved: {error}"
-        return summary, _rendered_board(slug, private)
+        return summary, _rendered_board(slug)
 
     summary += f"\n\n✅ **{model} is now shown on the relevant boards.**"
     if hvg_rows:
@@ -470,7 +472,7 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ Contact metadata was not saved: {error}"
-    return summary, _rendered_board(slug, private)
+    return summary, _rendered_board(slug)
 
 
 def _landing_tab(params: dict, has_board: bool) -> str:
@@ -485,40 +487,47 @@ def _landing_tab(params: dict, has_board: bool) -> str:
     return "board" if has_board else "boards"
 
 
+def _viewed_version(params: dict) -> Version:
+    """The version a visitor asked for; Submit and unknown numbers get the current."""
+    if params.get("tab") == "submit":
+        return CURRENT
+    number = params.get(VERSION_PARAM)
+    return next((listed for listed in VERSIONS if listed.number == number), CURRENT)
+
+
 def _init(request: gr.Request):
     """Render every page but Boards from one fetch, landing where the query asks.
 
-    The fetched state is returned too, so ``_render_overview`` builds Boards from
-    it without a second round trip.
+    Navigation reloads the page, so the Board page is rendered only when a visitor
+    lands on it. The fetched state is returned too, so ``_render_overview`` builds
+    Boards from it without a second round trip.
     """
-    state = _page_state()
-    by_id, boards, df = state
     params = dict(request.query_params) if request else {}
+    state = _page_state(_viewed_version(params))
+    by_id, boards, df, version = state
     board = by_slug(boards, params.get("board"))
     selected = _landing_tab(params, bool(params.get("board") and board))
     active_slug = board.slug if selected == "board" and board else None
     active_tab = selected if selected in FOOT_TABS else None
-    private = params.get(VIEW_PARAM) == PRIVATE_VIEW
     return (
         gr.Tabs(selected=selected),
-        rail_html(boards, by_id, active_slug, active_tab, private),
+        rail_html(boards, active_slug, active_tab, version),
         board.slug if board else None,
-        private,
         state,
-        render_tasks(by_id, private),
+        render_tasks(by_id),
         _about_text(by_id),
-        render_board(board, df, by_id, private),
+        render_board(board, df, by_id) if selected == "board" else "",
     )
 
 
-def _render_overview(state: PageState, private: bool) -> tuple[str, None]:
+def _render_overview(state: PageState) -> tuple[str, None]:
     """The Boards page, rendered after ``_init``.
 
     It rates every board, so it is the slowest page and must not hold back the
     one a visitor landed on. The state is then released, as nothing reads it again.
     """
-    by_id, boards, df = state
-    return render_boards(boards, df, by_id, private), None
+    by_id, boards, df, version = state
+    return render_boards(boards, df, by_id, version), None
 
 
 def build_demo() -> gr.Blocks:
@@ -531,7 +540,6 @@ def build_demo() -> gr.Blocks:
         fill_width=True,
     ) as demo:
         active_board = gr.State(None)
-        private_view = gr.State(False)
         page_state = gr.State(None)
         with gr.Row(elem_id="pm-shell"):
             with gr.Column(elem_id="pm-rail"):
@@ -634,7 +642,6 @@ def build_demo() -> gr.Blocks:
                 hf_tb,
                 notes_tb,
                 active_board,
-                private_view,
             ],
             [result_md, board_html],
         )
@@ -648,19 +655,8 @@ def build_demo() -> gr.Blocks:
         demo.load(
             _init,
             None,
-            [
-                pages,
-                rail,
-                active_board,
-                private_view,
-                page_state,
-                tasks_html,
-                about_md,
-                board_html,
-            ],
-        ).success(
-            _render_overview, [page_state, private_view], [boards_html, page_state]
-        )
+            [pages, rail, active_board, page_state, tasks_html, about_md, board_html],
+        ).success(_render_overview, page_state, [boards_html, page_state])
     return demo
 
 

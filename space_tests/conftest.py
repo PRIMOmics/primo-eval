@@ -11,6 +11,16 @@ import pandas as pd
 import pytest
 from boards import build_boards
 from results import IS_BASELINE
+from versions import Version
+
+CLOSED = Version(
+    number="0.0",
+    release="v0.0.0",
+    opened="2026-09-01",
+    data="d" * 40,
+    labels="e" * 40,
+    reference="f" * 40,
+)
 
 RESULT_ROW = ["model_name", "task_id", "score", "submitted_at"]
 

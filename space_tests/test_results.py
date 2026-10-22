@@ -1,5 +1,9 @@
 """Unit tests for the results schema (no network, no Gradio)."""
 
+from pathlib import Path
+from types import SimpleNamespace
+
+import huggingface_hub
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,17 +16,24 @@ from results import (
     RESULT_COLUMNS,
     SUBMISSION_COLUMNS,
     SUBMISSION_ID,
+    VERSION,
     _embedding_manifest,
     display_name,
+    fetch_hvg_reference,
     owner_of,
+    read_csv,
+    task_rows,
+    version_rows,
     with_author_submission_flag,
     with_baseline_flag,
     with_institution,
     with_owner,
     with_paper_link,
     with_submission_id,
+    with_version,
     without_hvg,
 )
+from versions import CURRENT
 
 
 def _frame(**columns) -> pd.DataFrame:
@@ -141,8 +152,20 @@ def test_embedding_manifest_contains_checksum_and_coverage(tmp_path):
     assert manifest["n_rows"] == 3
     assert manifest["embedding_dimension"] == 1
     assert manifest["dataset_row_counts"] == {"d901": 2, "d902": 1}
+    assert manifest["representation"] == "embedding"
     assert len(manifest["sha256"]) == 64
     assert b"sample_id" not in payload
+
+
+def test_embedding_manifest_records_a_gene_space_representation(tmp_path):
+    path = tmp_path / "submission.csv"
+    pd.DataFrame(
+        {"dataset_id": ["d901"], "sample_id": ["s1"], "gene_0000": [1.0]}
+    ).to_csv(path, index=False)
+    manifest, _ = _embedding_manifest(
+        path, "model", "submission", "bulk-rna", "2026-01-01", "gene_space"
+    )
+    assert manifest["representation"] == "gene_space"
 
 
 @pytest.mark.parametrize("extension", [".csv", ".npz"])
@@ -177,3 +200,47 @@ def test_without_hvg_drops_only_hvg_entries():
     )
     assert list(without_hvg(df)["model_name"]) == ["m", "HVG-1200-genes", "m + HVG v2"]
     assert without_hvg(pd.DataFrame(columns=RESULT_COLUMNS)).empty
+
+
+def test_the_hvg_reference_is_read_at_the_commit_of_the_current_version(monkeypatch):
+    calls = []
+
+    def download(repo_id, filename, **kwargs):
+        calls.append(kwargs["revision"])
+        return "hvg.parquet"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+
+    assert fetch_hvg_reference(None) == Path("hvg.parquet")
+    assert calls == [CURRENT.reference]
+
+
+def test_rows_written_before_versions_existed_have_the_empty_version():
+    assert list(with_version(_frame())[VERSION]) == [""]
+    assert list(with_version(_frame(**{VERSION: [np.nan]}))[VERSION]) == [""]
+
+
+def test_a_version_keeps_only_its_own_rows():
+    df = pd.DataFrame({"model_name": ["a", "b", "c"], VERSION: ["0.1", "0.2", np.nan]})
+    assert list(version_rows(df, "0.1")["model_name"]) == ["a"]
+    assert list(version_rows(df, "")["model_name"]) == ["c"]
+
+
+def test_scored_rows_are_tagged_with_the_current_version():
+    result = {
+        "per_task": [
+            SimpleNamespace(task_id="t901", score=0.5, repeat_scores=[], diagnostics={})
+        ]
+    }
+    rows = task_rows("m", result, "2026-01-01", "s", {OWNER: "alice"})
+    assert [row[VERSION] for row in rows] == [CURRENT.number]
+
+
+def test_versions_are_read_back_as_text(tmp_path, monkeypatch):
+    path = tmp_path / "task_results.csv"
+    path.write_text("model_name,version\na,0.10\nb,\n")
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *a, **k: path)
+
+    df = with_version(read_csv("task_results.csv", RESULT_COLUMNS, None))
+
+    assert list(df[VERSION]) == ["0.10", ""]

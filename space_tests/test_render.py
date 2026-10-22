@@ -7,6 +7,7 @@ value, provenance never leaks, and public submission credits are safely escaped.
 """
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ import render
 from boards import AREA_GROUP, GROUP_NOTE, MODALITY_GROUP, build_boards, open_in_group
 from leaderboard import ELO_ANCHOR_MODEL
 from render import (
+    RELEASES_URL,
     SECTIONS,
     evaluation_confirmation,
     evaluation_status,
@@ -22,6 +24,9 @@ from render import (
     render_boards,
     render_tasks,
 )
+from versions import CURRENT
+
+from .conftest import CLOSED
 
 
 def _slugs(html: str) -> list[str]:
@@ -30,7 +35,7 @@ def _slugs(html: str) -> list[str]:
 
 def _boards_html(boards, registry, results):
     df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
-    return render_boards(boards, df, registry, private=False)
+    return render_boards(boards, df, registry)
 
 
 # ---------------------------------------------------------------- boards page
@@ -125,16 +130,14 @@ def test_the_podium_is_medalled(boards, registry, results):
         ],
         ignore_index=True,
     )
-    html = render_boards(boards, df, registry, private=False)
+    html = render_boards(boards, df, registry)
     assert "🥇" in html
     assert "🥈" in html
 
 
 def test_a_board_nobody_covered_invites_the_first_submission(boards, registry, results):
     """A board no model covered in full asks for the first entry, not a leader."""
-    html = render_boards(
-        boards, results(("eva", "t901", 0.8, "2026-01-01")), registry, private=False
-    )
+    html = render_boards(boards, results(("eva", "t901", 0.8, "2026-01-01")), registry)
     assert "be the first" in html.lower()
 
 
@@ -145,7 +148,7 @@ def test_a_board_held_only_by_baselines_lists_its_models(
     df = flagged_results(
         *[("pca-50", tid, 0.8, "2026-01-01", True) for tid in registry]
     )
-    html = render_boards(boards, df, registry, private=False)
+    html = render_boards(boards, df, registry)
     assert "be the first" not in html.lower()
     assert "pca-50" in html
 
@@ -156,7 +159,7 @@ def test_a_baseline_is_teased_like_any_other_leader(boards, registry, flagged_re
         *[("pca-50", tid, 0.8, "2026-01-01", True) for tid in registry],
         *[("eva", tid, 0.9, "2026-01-01", False) for tid in registry],
     )
-    html = render_boards(boards, df, registry, private=False)
+    html = render_boards(boards, df, registry)
     assert "pca-50" in html and "eva" in html
     assert "pm-badge--marine" not in html
 
@@ -183,7 +186,7 @@ def test_ranked_table_bolds_the_best_and_captions_full_coverage(
         *[("eva", tid, 0.9, "2026-01-01", False) for tid in registry],
         *[("foo", tid, 0.5, "2026-01-01", False) for tid in registry],
     )
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "are ranked" in html
     assert "eva" in html and "foo" in html
     assert "font-weight:700" in html  # the best value is bolded
@@ -208,14 +211,14 @@ def test_ranked_table_bolds_the_lowest_mean_rank():
 
 def test_data_tables_expose_sortable_column_headers(boards, registry, named, results):
     df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert 'class="pm-sort" data-sort-index="0"' in html
     assert 'aria-sort="none"' in html
 
 
 def test_per_task_names_expose_expanded_accessible_context(registry, named, results):
     df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
 
     assert 'class="pm-task-guide"' in html
     assert "Patients: 90 patients with Crohn Disease, Ulcerative Colitis" in html
@@ -233,7 +236,7 @@ def test_per_task_scores_show_sd_only_when_repeats_are_available(
         ("missing", "t901", 0.5, "2026-01-01"),
     ).assign(repeat_scores=["[0.6, 0.8]", "[0.6]", ""])
 
-    html = render_board(named("Gastroenterology"), df, registry, private=False)
+    html = render_board(named("Gastroenterology"), df, registry)
 
     assert '<span class="pm-sd" aria-hidden="true"> ± 0.100</span>' in html
     css = Path(render.__file__).with_name("primo.css").read_text()
@@ -263,7 +266,6 @@ def test_category_board_markup_is_scoped_to_its_named_modality(registry, results
             ("m", "t906", 0.6, "2026-01-01"),
         ),
         registry,
-        private=False,
     )
 
     assert ">Area<" in html
@@ -280,9 +282,7 @@ def test_task_tooltip_discloses_repeated_collection_samples(registry, results):
     registry["t901"]["n_samples"] = 126
     boards = build_boards(registry)
     board = next(board for board in boards if board.name == "Bulk RNAseq")
-    html = render_board(
-        board, results(("eva", "t901", 0.8, "2026-01-01")), registry, private=False
-    )
+    html = render_board(board, results(("eva", "t901", 0.8, "2026-01-01")), registry)
     assert "20 patients (126 collection samples)" in html
 
 
@@ -290,7 +290,7 @@ def test_native_score_cells_explain_ranges_and_random_performance(
     registry, named, results
 ):
     df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
 
     assert 'data-tooltip="Range: 0 to 1 · Random predictor: 0.5"' in html
     assert 'data-tooltip="Range: -1 to 1 · Random predictor: 0 (expected)"' in html
@@ -326,7 +326,7 @@ def test_ranked_board_shows_only_the_institution_credit(
 ):
     df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
     df["institution"] = "Scienta"
-    html = render_board(build_boards(registry)[0], df, registry, private=False)
+    html = render_board(build_boards(registry)[0], df, registry)
     assert "Institution" in html and "Scienta" in html
     assert "Team" not in html
     assert "Author" not in html
@@ -335,7 +335,7 @@ def test_ranked_board_shows_only_the_institution_credit(
 def test_board_escapes_submission_credit(registry, named, flagged_results):
     df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
     df["institution"] = "<script>alert(1)</script>"
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "<script>" not in html and "&lt;script&gt;" in html
 
 
@@ -345,11 +345,30 @@ def test_author_submission_gets_a_check_chip_and_paper_link(
     df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
     df["is_author_submission"] = True
     df["paper_link"] = "https://example.org/paper"
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert 'href="https://example.org/paper"' in html
     assert ">eva</a>" in html
     assert 'class="pm-author-chip"' in html
     assert "✓ Authors" in html
+
+
+VARIANT = re.compile(
+    r'<div class="(pm-(?:with-hvg|without-hvg|all-tasks|private-tasks)[a-z -]*)">'
+)
+
+
+def _variants(html: str) -> dict[str, str]:
+    """A board group's tables, one per switch state, keyed by their classes."""
+    parts = VARIANT.split(html)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
+def _ranked(html: str) -> dict[str, str]:
+    return _variants(html.split("Per task")[0])
+
+
+def _per_task(html: str) -> dict[str, str]:
+    return _variants(html.split("Per task")[1])
 
 
 def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(
@@ -359,19 +378,11 @@ def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(
         *[("eva + HVG", tid, 0.9, "2026-01-01", False) for tid in registry]
     )
     df["is_author_submission"] = True
-    html = render_board(named("bulk RNA"), df, registry, private=False)
-    with_hvg = html.split('class="pm-with-hvg"')[1].split('class="pm-without-hvg"')[0]
-    ranked = with_hvg.split('class="pm-hvg-chip"')
+    html = render_board(named("Gastroenterology"), df, registry)
+    ranked = _ranked(html)["pm-with-hvg"].split('class="pm-hvg-chip"')
     assert len(ranked) == 2
     assert ranked[0].endswith("eva <span ")
     assert '+ HVG</span> <span class="pm-author-chip"' in ranked[1]
-
-
-def _variants(html: str) -> tuple[str, str]:
-    """The ranked tables shown with and without ``+ HVG`` entries."""
-    ranked = html.split("Per task")[0]
-    with_hvg, plain = ranked.split('class="pm-without-hvg"')
-    return with_hvg.split('class="pm-with-hvg"')[1], plain
 
 
 def test_hvg_entries_are_shown_by_default_and_can_be_hidden(
@@ -382,30 +393,38 @@ def test_hvg_entries_are_shown_by_default_and_can_be_hidden(
         *[("eva + HVG", tid, 0.9, "2026-01-01", False) for tid in registry],
         *[("foo", tid, 0.7, "2026-01-01", False) for tid in registry],
     )
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("Gastroenterology"), df, registry)
     assert render.HVG_TOGGLE in html
-    assert re.search(r'<input type="checkbox"[^>]*class="pm-hvg-toggle" checked>', html)
-    with_hvg, plain = _variants(html)
+    assert re.search(r'<input type="checkbox"[^>]*pm-hvg-toggle" checked>', html)
+    ranked = _ranked(html)
+    with_hvg, plain = ranked["pm-with-hvg"], ranked["pm-without-hvg"]
     assert "pm-hvg-chip" in with_hvg and "pm-hvg-chip" not in plain
     rank_one = '<td class="pm-num">1</td><td class="pm-name">'
     assert f"{rank_one}eva <span" in with_hvg
     assert f"{rank_one}foo</td>" in plain
-    per_task_with_hvg, per_task_plain = html.split("Per task")[1].split(
-        'class="pm-without-hvg"'
-    )
-    assert ">eva + HVG</th>" in per_task_with_hvg
-    assert "eva + HVG" not in per_task_plain
+    per_task = _per_task(html)
+    assert ">eva + HVG</th>" in per_task["pm-with-hvg"]
+    assert "eva + HVG" not in per_task["pm-without-hvg"]
 
 
-def test_hvg_toggle_css_hides_the_unselected_variant():
+def test_switch_css_hides_the_unselected_variants():
     css = Path(render.__file__).with_name("primo.css").read_text()
     assert "#pm-main .pm-hvg-toggle:checked ~ .pm-group .pm-without-hvg" in css
     assert "#pm-main .pm-hvg-toggle:not(:checked) ~ .pm-group .pm-with-hvg" in css
+    assert "#pm-main .pm-private-toggle:checked ~ .pm-group .pm-all-tasks" in css
+    assert (
+        "#pm-main .pm-private-toggle:not(:checked) ~ .pm-group .pm-private-tasks" in css
+    )
+    assert "#pm-main:has(.pm-private-toggle:checked) .pm-head .pm-all-tasks" in css
+    assert (
+        "#pm-main:has(.pm-private-toggle:not(:checked)) .pm-head .pm-private-tasks"
+        in css
+    )
 
 
 def test_a_board_without_hvg_entries_has_no_toggle(registry, named, results):
     df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "pm-hvg-toggle" not in html
     assert "pm-without-hvg" not in html
 
@@ -415,16 +434,86 @@ def test_hvg_entries_on_other_boards_add_no_toggle(registry, named, results):
         *[("eva", tid, 0.8, "2026-01-01") for tid in registry],
         ("eva + HVG", "t904", 0.9, "2026-01-01"),
     )
-    gastro = render_board(named("Gastroenterology"), df, registry, private=False)
-    derma = render_board(named("Dermatology"), df, registry, private=False)
+    gastro = render_board(named("Gastroenterology"), df, registry)
+    derma = render_board(named("Dermatology"), df, registry)
     assert "pm-hvg-toggle" not in gastro
     assert "pm-hvg-toggle" in derma
+
+
+def _eva_skips_the_public_task(flagged_results, registry):
+    """The anchor covers every task; ``eva`` skips the public ``t904``."""
+    return flagged_results(
+        *[(ELO_ANCHOR_MODEL, tid, 0.5, "2026-01-01", True) for tid in registry],
+        *[("eva", tid, 0.8, "2026-01-01", False) for tid in registry if tid != "t904"],
+    )
+
+
+def test_private_toggle_comes_unticked_below_the_hvg_one(registry, named, results):
+    df = results(
+        *[("eva", tid, 0.8, "2026-01-01") for tid in registry],
+        ("eva + HVG", "t901", 0.9, "2026-01-01"),
+    )
+    html = render_board(named("bulk RNA"), df, registry)
+    assert f"{render.HVG_TOGGLE}<br>{render.PRIVATE_TOGGLE}" in html
+    assert re.search(r'<input type="checkbox"[^>]*pm-private-toggle">', html)
+    assert set(_ranked(html)) == {
+        f"{hvg} {scope}"
+        for hvg in ("pm-with-hvg", "pm-without-hvg")
+        for scope in ("pm-all-tasks", "pm-private-tasks")
+    }
+
+
+def test_only_private_tasks_ranks_a_model_that_skipped_only_public_ones(
+    registry, named, flagged_results
+):
+    df = _eva_skips_the_public_task(flagged_results, registry)
+    html = render_board(named("bulk RNA"), df, registry)
+    ranked, per_task = _ranked(html), _per_task(html)
+    eva_ranked = '<td class="pm-name">eva</td>'
+    assert eva_ranked not in ranked["pm-all-tasks"]
+    assert eva_ranked in ranked["pm-private-tasks"]
+    assert "Psoriasis PASI" in per_task["pm-all-tasks"]
+    assert "Psoriasis PASI" not in per_task["pm-private-tasks"]
+
+
+def test_the_header_counts_follow_the_private_toggle(registry, named, results):
+    html = render_board(named("bulk RNA"), results(), registry)
+    head = html.split('<div class="pm-body">')[0]
+
+    every_task = re.search(r'<p class="pm-all-tasks">([^<]*)</p>', head).group(1)
+    private = re.search(r'<p class="pm-private-tasks">([^<]*)</p>', head).group(1)
+
+    assert "5 tasks · 4 cohorts · 350 patients" in every_task
+    assert "4 tasks · 3 cohorts · 270 patients" in private
+
+
+def test_private_toggle_only_on_boards_mixing_public_and_private_tasks(
+    registry, named, results
+):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    assert "pm-private-toggle" in render_board(named("bulk RNA"), df, registry)
+    for name in ("Gastroenterology", "Dermatology"):
+        html = render_board(named(name), df, registry)
+        assert "pm-private-toggle" not in html
+        assert "pm-all-tasks" not in html
+
+
+def test_pages_carry_no_view_switch(boards, registry, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    for html in (
+        render_boards(boards, df, registry),
+        render_tasks(registry),
+        rail_html(boards, None, None),
+    ):
+        assert "pm-private-toggle" not in html
+        assert "view=" not in html
+    assert "Psoriasis PASI" in render_tasks(registry)
 
 
 def test_unsafe_paper_link_is_not_rendered_as_a_link(registry, named, flagged_results):
     df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
     df["paper_link"] = 'javascript:alert("x")'
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "javascript:" not in html
     assert ">eva<" in html
 
@@ -432,7 +521,7 @@ def test_unsafe_paper_link_is_not_rendered_as_a_link(registry, named, flagged_re
 def test_board_keeps_legacy_private_owners_hidden(registry, named, flagged_results):
     df = flagged_results(*[("eva", tid, 0.9, "2026-01-01", False) for tid in registry])
     df["hf_username"] = "legacy-private-owner"
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "legacy-private-owner" not in html
 
 
@@ -441,24 +530,24 @@ def test_board_escapes_a_hostile_model_name(registry, named, flagged_results):
     df = flagged_results(
         *[(hostile, tid, 0.9, "2026-01-01", False) for tid in registry]
     )
-    html = render_board(named("bulk RNA"), df, registry, private=False)
+    html = render_board(named("bulk RNA"), df, registry)
     assert "<img src=x" not in html
     assert "&lt;img src=x" in html
 
 
 def test_an_empty_board_invites_the_first_submission(registry, results, named):
-    html = render_board(named("bulk RNA"), results(), registry, private=False)
+    html = render_board(named("bulk RNA"), results(), registry)
     assert "be the first" in html.lower()
 
 
 def test_a_missing_board_renders_a_message_not_a_crash(registry, results):
-    html = render_board(None, results(), registry, private=False)
+    html = render_board(None, results(), registry)
     assert "No board available" in html
 
 
 # ------------------------------------------------------------------- tasks page
 def test_tasks_page_shows_biology_but_never_an_accession(registry):
-    html = render_tasks(registry, private=False)
+    html = render_tasks(registry)
     assert "Crohn Disease" in html
     assert "Treatment outcome" in html
     assert not re.search(r"GSE\d+|E-MTAB-\d+", html)
@@ -466,22 +555,22 @@ def test_tasks_page_shows_biology_but_never_an_accession(registry):
 
 def test_tasks_page_escapes_registry_text(registry):
     registry["t904"]["diseases"] = ['<img src=x onerror="alert(1)">']
-    html = render_tasks(registry, private=False)
+    html = render_tasks(registry)
     assert "<img src=x" not in html
     assert "&lt;img src=x" in html
 
 
 # ------------------------------------------------------------------------ rail
-def test_rail_links_every_board_and_marks_the_active_one(boards, registry):
+def test_rail_links_every_board_and_marks_the_active_one(boards):
     active = boards[0].slug
-    html = rail_html(boards, registry, active, None, private=False)
+    html = rail_html(boards, active, None)
     assert set(_slugs(html)) == {b.slug for b in boards}
     assert f'class="pm-link pm-active" target="_self" href="?board={active}"' in html
     assert "Submit a model" in html
 
 
-def test_rail_boards_control_has_a_visible_chevron(boards, registry):
-    html = rail_html(boards, registry, None, None, private=False)
+def test_rail_boards_control_has_a_visible_chevron(boards):
+    html = rail_html(boards, None, None)
 
     assert '<details class="pm-rail-section" open>' in html
     assert '<summary class="pm-rail-summary pm-active">' in html
@@ -495,8 +584,8 @@ def test_rail_boards_control_has_a_visible_chevron(boards, registry):
     assert "color: #fff" in chevron_rule.group(1)
 
 
-def test_rail_groups_contain_their_board_links(boards, registry):
-    html = rail_html(boards, registry, None, None, private=False)
+def test_rail_groups_contain_their_board_links(boards):
+    html = rail_html(boards, None, None)
     groups = re.findall(r'<div class="pm-rail-group">(.*?)</div>', html)
     grouped = "".join(groups)
     n_open = sum(len(open_in_group(boards, group)) for group in SECTIONS)
@@ -505,8 +594,8 @@ def test_rail_groups_contain_their_board_links(boards, registry):
     assert grouped.count('href="?tab=contribute"') == n_open
 
 
-def test_rail_open_slices_route_to_contribute(boards, registry):
-    html = rail_html(boards, registry, None, None, private=False)
+def test_rail_open_slices_route_to_contribute(boards):
+    html = rail_html(boards, None, None)
     assert 'href="?tab=contribute"' in html
     assert "Proteomics" in html
 
@@ -519,11 +608,108 @@ def test_rail_category_labels_render_in_uppercase():
     assert "text-transform: uppercase" in label_rule.group(1)
 
 
-def test_rail_category_labels_use_consistent_authored_casing(boards, registry):
-    html = rail_html(boards, registry, None, None, private=False)
+def test_rail_category_labels_use_consistent_authored_casing(boards):
+    html = rail_html(boards, None, None)
     labels = re.findall(r'<p class="pm-rail-label">([^<]+)</p>', html)
 
     assert labels == ["Per modality", "Per therapeutic areas", "Task Category"]
+
+
+def _version_menu(html: str) -> str:
+    return re.search(r'<details class="pm-version">(.*?)</details>', html).group(1)
+
+
+def test_the_version_menu_sits_under_the_logo(boards):
+    html = rail_html(boards, None, None)
+
+    brand, menu = html.index('class="pm-brand"'), html.index('class="pm-version"')
+    assert brand < menu < html.index('class="pm-rail-section"')
+
+
+def test_the_version_menu_names_the_current_version_and_its_release_notes(boards):
+    menu = _version_menu(rail_html(boards, None, None))
+
+    assert f'Version v{CURRENT.number}</span><span class="pm-count">current' in menu
+    assert f'href="{RELEASES_URL}/{CURRENT.release}"' in menu
+    assert "version=" not in menu
+
+
+def test_the_rail_of_the_current_version_has_no_closed_notice(boards):
+    assert "pm-rail-notice" not in rail_html(boards, None, None)
+
+
+def test_the_version_menu_marks_the_version_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    menu = _version_menu(rail_html(boards, None, None, CLOSED))
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert f'Version v{CLOSED.number}</span><span class="pm-count">closed' in menu
+    assert f'class="pm-link pm-active" target="_self" href="?tab=boards{tag}"' in menu
+    assert 'class="pm-link" target="_self" href="?tab=boards"' in menu
+    assert f"from {CLOSED.opened}" in menu
+
+
+def test_a_version_switch_stays_on_the_page_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    slug, tag = boards[0].slug, f"&amp;version={CLOSED.number}"
+
+    on_board = _version_menu(rail_html(boards, slug, None))
+    on_tasks = _version_menu(rail_html(boards, None, "tasks"))
+    on_submit = _version_menu(rail_html(boards, None, "submit"))
+
+    assert f'href="?board={slug}{tag}"' in on_board
+    assert f'href="?tab=tasks{tag}"' in on_tasks
+    assert f'href="?tab=boards{tag}"' in on_submit
+
+
+def test_a_closed_version_keeps_every_rail_link_on_it_but_submit(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    html = rail_html(boards, None, "tasks", CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert set(_slugs(html.replace(tag, ""))) == {b.slug for b in boards}
+    for slug in _slugs(html.replace(tag, "")):
+        assert f'href="?board={slug}{tag}"' in html
+    assert f'href="?tab=tasks{tag}"' in html
+    assert 'href="?tab=submit"' in html
+    assert f'href="{RELEASES_URL}/{CLOSED.release}"' in html
+
+
+def test_a_closed_version_says_when_it_closed_and_links_the_current_one(
+    boards, monkeypatch
+):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, CLOSED),
+    ).group(1)
+
+    assert f"from {CLOSED.opened} to {CURRENT.opened}" in notice
+    assert f'href="?tab=boards">Go to the current version, v{CURRENT.number}' in notice
+
+
+def test_a_version_that_closed_the_day_it_opened_says_so(boards, monkeypatch):
+    same_day = replace(CLOSED, opened=CURRENT.opened)
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, same_day])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, same_day),
+    ).group(1)
+
+    assert f"from {CURRENT.opened} to {CURRENT.opened}" in notice
+
+
+def test_the_cards_of_a_closed_version_keep_it(boards, registry, results, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    html = render_boards(boards, df, registry, CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert {slug.removesuffix(tag) for slug in _slugs(html)} == {b.slug for b in boards}
+    assert all(slug.endswith(tag) for slug in _slugs(html))
+    assert f'href="?tab=contribute{tag}"' in html
 
 
 # ------------------------------------------------------ evaluation confirmation
@@ -553,84 +739,8 @@ def test_evaluation_status_announces_that_scoring_is_in_progress():
 def test_only_public_tasks_get_a_public_chip(registry, named, results):
     df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
     for html in (
-        render_board(named("bulk RNA"), df, registry, private=False),
-        render_tasks(registry, private=False),
+        render_board(named("bulk RNA"), df, registry),
+        render_tasks(registry),
     ):
         assert html.count('class="pm-public-chip"') == 1
         assert re.search(r'Psoriasis PASI</span> <span class="pm-public-chip"', html)
-
-
-# ------------------------------------------------------------------ view switch
-def _private_slugs(html: str) -> list[str]:
-    return re.findall(r'href="\?board=([^"&]+)&amp;view=private"', html)
-
-
-def _eva_skips_the_public_task(flagged_results, registry):
-    """The anchor covers every task; ``eva`` skips the public ``t904``."""
-    return flagged_results(
-        *[(ELO_ANCHOR_MODEL, tid, 0.5, "2026-01-01", True) for tid in registry],
-        *[("eva", tid, 0.8, "2026-01-01", False) for tid in registry if tid != "t904"],
-    )
-
-
-def _ranked_part(html: str) -> str:
-    return html.split("Per task")[0]
-
-
-def test_view_switch_marks_the_current_view_and_keeps_the_page(
-    registry, named, results
-):
-    html = render_board(named("bulk RNA"), results(), registry, private=True)
-    assert '<a target="_self" href="?board=bulk-rna">All tasks</a>' in html
-    assert (
-        '<a class="pm-active" aria-current="page" target="_self" '
-        'href="?board=bulk-rna&amp;view=private">Private tasks</a>'
-    ) in html
-
-
-def test_private_board_ranks_a_model_that_skipped_only_public_tasks(
-    registry, named, flagged_results
-):
-    df = _eva_skips_the_public_task(flagged_results, registry)
-    full = render_board(named("bulk RNA"), df, registry, private=False)
-    private = render_board(named("bulk RNA"), df, registry, private=True)
-    eva_ranked = '<td class="pm-name">eva</td>'
-    assert eva_ranked not in _ranked_part(full)
-    assert eva_ranked in _ranked_part(private)
-    assert "Psoriasis PASI" in full and "Psoriasis PASI" not in private
-    assert "4 tasks" in private
-
-
-def test_a_board_of_public_tasks_says_so_in_the_private_view(registry, named, results):
-    html = render_board(named("Dermatology"), results(), registry, private=True)
-    assert "Every task of this board is public." in html
-    assert "pm-table" not in html
-
-
-def test_home_cards_keep_every_board_in_the_private_view(
-    boards, registry, flagged_results
-):
-    df = _eva_skips_the_public_task(flagged_results, registry)
-    full = render_boards(boards, df, registry, private=False)
-    private = render_boards(boards, df, registry, private=True)
-    assert set(_private_slugs(private)) == set(_slugs(full))
-    assert "Every task of this board is public." in private
-    assert private.count("pm-card--open") == full.count("pm-card--open") + 1
-    assert private.count("eva") > full.count("eva")
-
-
-def test_rail_links_and_counts_follow_the_private_view(boards, registry):
-    html = rail_html(boards, registry, None, None, private=True)
-    links = re.findall(r'href="([^"]+)"', html)
-    assert links and all(link.endswith("&amp;view=private") for link in links)
-    assert (
-        'href="?board=bulk-rna&amp;view=private">'
-        '<span class="pm-label">Bulk RNAseq</span><span class="pm-count">4</span>'
-    ) in html
-
-
-def test_private_tasks_page_hides_the_public_tasks(registry):
-    html = render_tasks(registry, private=True)
-    assert "Psoriasis PASI" not in html
-    assert "4 targets" in html
-    assert 'href="?tab=tasks">All tasks</a>' in html
