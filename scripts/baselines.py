@@ -25,13 +25,19 @@ writes. Anyone can then score its public tasks with ``primo evaluate``:
     uv run python scripts/baselines.py --data-dir primo-data --modality bulk-rna \\
         --out-dir baselines
 
-Maintainers score every task with the Space scorer (``--score``), then publish
-the scores, flagged as baselines, and the ``+ HVG`` reference features
-(``--publish``). The labels come from the Hub with ``HF_TOKEN``, or from a local
-copy of the labels repo with ``--labels-dir``:
+``--score`` scores every task with the Space scorer, for a local comparison. The
+labels come from the Hub with ``HF_TOKEN``, or from a local copy of the labels
+repo with ``--labels-dir``.
+
+``--publish`` prepares a new board version: it uploads the HVG-1200 features as
+the ``+ HVG`` reference, then logs the data and reference commits to pin in
+``space/versions.yaml``. The version rescore scores the ``HVG-1200-genes``
+baseline and every ``+ HVG`` entry from them. The features must be built from
+the data on the Hub, so ``--publish`` stops when a dataset changed since
+``primo download``:
 
     uv run python scripts/baselines.py --data-dir primo-data --out-dir baselines \\
-        --config HVG-1200-genes --score --publish
+        --publish
 """
 
 import argparse
@@ -40,7 +46,6 @@ import math
 import os
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import anndata as ad
@@ -60,6 +65,7 @@ from evaluator import (
     LABELS_FILENAME,
     MANIFEST_FILENAME,
     MODALITIES,
+    PUBLIC_REPO,
     RANDOM_STATE,
     SAMPLE_ID,
     TARGETS_FILENAME,
@@ -69,19 +75,12 @@ from evaluator import (
     load_tasks_registry,
     score_all,
 )
-from results import (
-    HVG_REFERENCE_MODEL,
-    IS_BASELINE,
-    append_results,
-    task_rows,
-    upload_hvg_reference,
-)
+from results import HVG_REFERENCE_MODEL, upload_hvg_reference
 
 logger = logging.getLogger(__name__)
 
 TARGET_SUM = 1_000_000
 SINGLE_CELL_TARGET_SUM = 10_000
-TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 SUBMISSION_PREFIX = "submission"
 SCORES_FILENAME = "baselines_scores.csv"
@@ -292,42 +291,38 @@ def score_submission(
     )
 
 
-def publish_scores(config: BaselineConfig, result: dict, token: str | None) -> None:
-    """Append one baseline's per-task scores to the public leaderboard.
+def check_data_is_current(data_dir: Path) -> str:
+    """Return the commit of the data on the Hub, or stop if a dataset changed.
 
-    Written under the config name and flagged ``is_baseline``, so the Space ranks
-    it against submitted models instead of hiding it in a footnote. Re-publishing
-    supersedes the previous run: the leaderboard keeps each name's latest rows.
-    ``task_rows`` builds the rows, as for every row of the Space.
-
-    No ``hf_username`` is written, unlike a Submit-form row: a baseline has no
-    owner, and ``append_results`` backfills the column. That is what keeps a
-    published baseline from locking its name against a submitted model.
+    The reference features must be built from the data that a board version
+    pins, so every downloaded file has to be the one on the Hub today.
     """
-    submitted_at = datetime.now(UTC).strftime(TIMESTAMP_FORMAT)
-    rows = [
-        {**row, IS_BASELINE: True}
-        for row in task_rows(config.name, result, submitted_at, "", {})
-    ]
-    if not rows:
-        raise ValueError(
-            f"Baseline '{config.name}' scored no task; nothing to publish."
+    from huggingface_hub import HfApi
+
+    from primomics.data import changed_datasets
+
+    changed = changed_datasets(data_dir, load_manifest(data_dir))
+    if changed:
+        raise SystemExit(
+            f"--publish needs the data of the Hub, and these datasets changed since "
+            f"primo download: {changed}. Run primo download, then publish again."
         )
-    append_results(rows, token)
-    logger.info("Published %d baseline scores for '%s'.", len(rows), config.name)
+    return HfApi().dataset_info(PUBLIC_REPO).sha
 
 
-def publish_reference(config: BaselineConfig, path: Path, token: str | None) -> None:
+def publish_reference(config: BaselineConfig, path: Path, token: str | None) -> str:
     """Upload the features every submission is concatenated with (``+ HVG``).
 
-    Only the reference config is uploaded, together with its scores, so the
-    features and the published baseline always come from one run. Existing
-    ``+ HVG`` entries keep their scores until they are scored again with them.
+    Returns the commit of the results repo that holds them, for a new board
+    version to pin. The version rescore then scores the baseline from them.
     """
     if config.name != HVG_REFERENCE_MODEL:
-        return
-    upload_hvg_reference(path, token)
-    logger.info("Published '%s' as the HVG reference features.", config.name)
+        raise ValueError(
+            f"only {HVG_REFERENCE_MODEL} is the + HVG reference, not {config.name}"
+        )
+    commit = upload_hvg_reference(path, token)
+    logger.info("Uploaded the %s features as the + HVG reference.", config.name)
+    return commit
 
 
 _META_COLS = ("config", "coverage")
@@ -403,7 +398,7 @@ def main() -> None:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Push the scores to the public leaderboard, flagged as baselines.",
+        help="Upload the HVG-1200 features as the + HVG reference of a new board version.",
     )
     args = parser.parse_args()
 
@@ -416,8 +411,13 @@ def main() -> None:
             "--publish needs every dataset of every modality: drop --modality and "
             "--datasets."
         )
+    if args.publish and HVG_REFERENCE_MODEL not in {config.name for config in configs}:
+        raise SystemExit(
+            f"--publish uploads the {HVG_REFERENCE_MODEL} features: add it to --config."
+        )
     if args.score and args.labels_dir is None and not token:
         raise SystemExit("--score reads the labels on the Hub: set HF_TOKEN.")
+    data_commit = check_data_is_current(args.data_dir) if args.publish else None
 
     rows = []
     for config in configs:
@@ -425,7 +425,7 @@ def main() -> None:
             args.data_dir, config, args.modality, args.datasets
         )
         path = write_submission(submission, args.out_dir, config)
-        if args.score or args.publish:
+        if args.score:
             result = score_submission(
                 path,
                 args.data_dir,
@@ -435,9 +435,14 @@ def main() -> None:
                 token=token,
             )
             rows.append(_score_row(config, result))
-            if args.publish:
-                publish_scores(config, result, token)
-                publish_reference(config, path, token)
+        if args.publish and config.name == HVG_REFERENCE_MODEL:
+            reference_commit = publish_reference(config, path, token)
+            logger.info(
+                "Pin these commits in space/versions.yaml for the new board version: "
+                "data %s, reference %s.",
+                data_commit,
+                reference_commit,
+            )
 
     if rows:
         _log_scores(rows)

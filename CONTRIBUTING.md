@@ -101,7 +101,14 @@ A release that changes scores also opens a board version:
 
 1. In the release PR, add the new version at the top of `space/versions.yaml`,
    with the commits of the data, the labels and the HVG features it reads, and set
-   `current` to it.
+   `current` to it. When the data changes, build the HVG features from it first,
+   after a `primo download` of every modality:
+
+   ```bash
+   HF_TOKEN=... uv run python scripts/baselines.py --out-dir baselines --publish
+   ```
+
+   It uploads the features and logs the data and reference commits to pin.
 2. After the merge, tag the release as above. Also tag the commits of step 1 `v0.2`
    on the three Hub dataset repos.
 3. From the tag, score the live entries of the previous version again from their

@@ -1,8 +1,11 @@
+import logging
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import anndata as ad
 import baselines
+import huggingface_hub
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,8 +22,9 @@ from baselines import (
     prediction_ids,
     score_submission,
 )
-from results import IS_BASELINE, task_rows
 from scipy.sparse import csr_matrix
+
+import primomics.data
 
 
 def _adata(x: np.ndarray) -> ad.AnnData:
@@ -322,20 +326,97 @@ def test_score_submission_reads_the_hub_without_a_local_copy(tmp_path, monkeypat
     assert "fetch_labels" not in calls
 
 
-def test_published_scores_are_task_rows_flagged_as_a_baseline(monkeypatch):
-    published = []
+def _main(monkeypatch: pytest.MonkeyPatch, *argv: str) -> None:
+    monkeypatch.setattr(sys, "argv", ["baselines.py", *argv])
+    baselines.main()
+
+
+def test_publish_needs_a_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    with pytest.raises(SystemExit, match="HF_TOKEN"):
+        _main(
+            monkeypatch,
+            "--data-dir",
+            str(tmp_path),
+            "--out-dir",
+            str(tmp_path),
+            "--publish",
+        )
+
+
+@pytest.mark.parametrize(
+    "partial", [("--modality", "bulk-rna"), ("--datasets", "d901")]
+)
+def test_publish_refuses_a_partial_reference(tmp_path, monkeypatch, partial):
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
+    with pytest.raises(SystemExit, match="every dataset of every modality"):
+        _main(
+            monkeypatch,
+            "--data-dir",
+            str(tmp_path),
+            "--out-dir",
+            str(tmp_path),
+            "--publish",
+            *partial,
+        )
+
+
+def test_publish_stops_when_the_data_changed_on_the_hub(tmp_path, monkeypatch):
+    _write_data(tmp_path / "data", {"d901": _adata(np.ones((4, 3)))})
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
     monkeypatch.setattr(
-        baselines, "append_results", lambda rows, token: published.extend(rows)
+        primomics.data, "changed_datasets", lambda data_dir, entries: ["d901"]
     )
-    result = {
-        "per_task": [
-            SimpleNamespace(
-                task_id="t901", score=0.51234, repeat_scores=[0.5], diagnostics={}
-            )
-        ]
-    }
+    uploads = []
+    monkeypatch.setattr(
+        baselines, "upload_hvg_reference", lambda path, token: uploads.append(path)
+    )
 
-    baselines.publish_scores(CONFIGS["HVG-1200-genes"], result, None)
+    with pytest.raises(SystemExit, match=r"changed since primo download: \['d901'\]"):
+        _main(
+            monkeypatch,
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--publish",
+        )
+    assert uploads == []
 
-    rows = task_rows("HVG-1200-genes", result, published[0]["submitted_at"], "", {})
-    assert published == [{**row, IS_BASELINE: True} for row in rows]
+
+def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
+    tmp_path, monkeypatch, caplog
+):
+    rng = np.random.default_rng(0)
+    _write_data(tmp_path / "data", {"d901": _adata(rng.poisson(5, size=(4, 3)))})
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
+    monkeypatch.setattr(
+        primomics.data, "changed_datasets", lambda data_dir, entries: []
+    )
+    monkeypatch.setattr(
+        huggingface_hub.HfApi,
+        "dataset_info",
+        lambda self, repo: SimpleNamespace(sha="data123"),
+    )
+    uploads = []
+    monkeypatch.setattr(
+        baselines,
+        "upload_hvg_reference",
+        lambda path, token: uploads.append(path) or "ref456",
+    )
+    monkeypatch.setattr(
+        baselines, "score_all", lambda *args, **kwargs: pytest.fail("scored")
+    )
+
+    with caplog.at_level(logging.INFO):
+        _main(
+            monkeypatch,
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--publish",
+        )
+
+    assert uploads == [tmp_path / "out" / "submission_HVG-1200-genes.parquet"]
+    assert "data data123, reference ref456" in caplog.text

@@ -193,9 +193,10 @@ Every Space submission is scored a second time concatenated with the
 `HVG-1200-genes` features and stored as `<model> + HVG`, with the parent's
 owner, credits and `submission_id`. The features are kept privately at
 `baselines/HVG-1200-genes/submission.parquet` in `PRIMOmics/primo-results`.
-`scripts/baselines.py --publish` uploads them. The reference is pinned by the board
-version. A new reference opens a new version, and the rescore below scores every
-`+ HVG` entry again with it.
+`scripts/baselines.py --publish` uploads them and logs the commit that holds them.
+The reference is pinned by the board version. A new reference opens a new
+version, and the rescore below scores the baseline and every `+ HVG` entry again
+with it.
 
 ## Board versions
 
