@@ -18,7 +18,9 @@ Two rules hold everywhere:
 Navigation is reload-based: the rail is a column of ``<a href="?board=slug">``
 and ``<a href="?tab=name">`` links, which costs a page load per click but buys
 shareable per-board URLs and needs no JavaScript, matching how the board cards
-have always worked.
+have always worked. On a closed board version, every link adds
+``&version=<number>`` so the visitor stays on it, except Submit: a submission
+always goes to the current version.
 """
 
 import math
@@ -50,16 +52,14 @@ from leaderboard import (
     top_models,
 )
 from results import without_hvg
+from versions import CURRENT, VERSIONS, Version
 
 SECTIONS = (MODALITY_GROUP, AREA_GROUP, CATEGORY_GROUP)
 MEDALS = ("🥇", "🥈", "🥉")
 N_TOP_MODELS = len(MEDALS)
 
-BRAND = (
-    '<a class="pm-brand" target="_self" href="?tab=boards">'
-    '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
-    "<b>PRIMO</b><span>benchmark</span></a>"
-)
+VERSION_PARAM = "version"
+RELEASES_URL = "https://github.com/PRIMOmics/primo-eval/releases/tag"
 
 FOOT_LINKS = (
     ("tasks", "Tasks"),
@@ -122,11 +122,89 @@ CHEVRON = (
 )
 
 
+def _href(query: str, version: Version = CURRENT) -> str:
+    """A reload link that stays on ``version``; the current one needs no tag."""
+    if version != CURRENT:
+        query = f"{query}&{VERSION_PARAM}={version.number}"
+    return escape(f"?{query}")
+
+
 # --------------------------------------------------------------------- rail
+def _brand(version: Version) -> str:
+    return (
+        f'<a class="pm-brand" target="_self" href="{_href("tab=boards", version)}">'
+        '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
+        "<b>PRIMO</b><span>benchmark</span></a>"
+    )
+
+
+def _number(version: Version) -> tuple[int, ...]:
+    """The version number as integers, so ``0.10`` comes after ``0.9``."""
+    return tuple(int(part) for part in version.number.split("."))
+
+
+def _closed_on(version: Version) -> str:
+    """The day the version after ``version`` opened."""
+    later = [listed for listed in VERSIONS if _number(listed) > _number(version)]
+    return min(later, key=_number).opened
+
+
+def _closed_notice(version: Version) -> str:
+    """On a closed version, say so and link back to the current one."""
+    if version == CURRENT:
+        return ""
+    return (
+        '<div class="pm-rail-notice">'
+        f"<b>Version v{escape(version.number)} is closed</b>"
+        f"<span>Its scores, from {escape(version.opened)} to "
+        f"{escape(_closed_on(version))}, are kept read-only.</span>"
+        f'<a target="_self" href="{_href("tab=boards")}">'
+        f"Go to the current version, v{escape(CURRENT.number)}</a></div>"
+    )
+
+
+def _page_query(active_slug: str | None, active_tab: str | None) -> str:
+    """The page on screen, so a version switch stays on it; Submit goes to Boards."""
+    if active_slug:
+        return f"board={active_slug}"
+    if active_tab and active_tab != "submit":
+        return f"tab={active_tab}"
+    return "tab=boards"
+
+
+def _version_menu(version: Version, page: str) -> str:
+    """The dropdown under the logo: every version, then the release notes."""
+    state = "current" if version == CURRENT else "closed"
+    parts = [
+        '<details class="pm-version"><summary class="pm-version-summary">'
+        f'<span class="pm-label">Version v{escape(version.number)}</span>'
+        f'<span class="pm-count">{state}</span>{CHEVRON}</summary>',
+        '<div class="pm-version-list">',
+    ]
+    for listed in VERSIONS:
+        cls = "pm-link pm-active" if listed == version else "pm-link"
+        note = "current" if listed == CURRENT else f"from {listed.opened}"
+        parts.append(
+            f'<a class="{cls}" target="_self" href="{_href(page, listed)}">'
+            f'<span class="pm-label">v{escape(listed.number)}</span>'
+            f'<span class="pm-count">{escape(note)}</span></a>'
+        )
+    notes = escape(f"{RELEASES_URL}/{version.release}")
+    parts.append(
+        f'<a class="pm-link" target="_blank" rel="noopener" href="{notes}">'
+        '<span class="pm-label">Release notes</span>'
+        f'<span class="pm-count">{escape(version.release)}</span></a></div></details>'
+    )
+    return "".join(parts)
+
+
 def rail_html(
-    boards: list[Board], active_slug: str | None, active_tab: str | None
+    boards: list[Board],
+    active_slug: str | None,
+    active_tab: str | None,
+    version: Version = CURRENT,
 ) -> str:
-    """The left navigation: brand, a collapsible "Boards" menu, then the foot links.
+    """The left navigation: brand, version menu, "Boards" menu, then the foot links.
 
     The board groups live inside a ``<details>`` toggle so the four foot links
     (Tasks, Submit, Contribute, Method) stay visible without scrolling. The toggle
@@ -135,13 +213,16 @@ def rail_html(
     ``active_slug`` highlights the board a visitor is on; ``active_tab`` highlights
     a foot link, and its absence means we are on a board or the overview, so the
     "Boards" menu is the active one. Open boards link to Contribute, mirroring the
-    overview cards.
+    overview cards. ``version`` is the board version on screen; the version menu
+    under the brand switches it and stays on the same page.
     """
     on_boards = active_tab is None
     summary_cls = "pm-rail-summary pm-active" if on_boards else "pm-rail-summary"
     parts = [
         '<div class="pm-rail-inner">',
-        BRAND,
+        _brand(version),
+        _version_menu(version, _page_query(active_slug, active_tab)),
+        _closed_notice(version),
         '<details class="pm-rail-section" open>',
         f'<summary class="{summary_cls}"><span>Boards</span>{CHEVRON}</summary>',
         '<div class="pm-rail-sections">',
@@ -155,14 +236,16 @@ def rail_html(
         )
         for board in cards:
             cls = "pm-link pm-active" if board.slug == active_slug else "pm-link"
+            href = _href(f"board={board.slug}", version)
             parts.append(
-                f'<a class="{cls}" target="_self" href="?board={escape(board.slug)}">'
+                f'<a class="{cls}" target="_self" href="{href}">'
                 f'<span class="pm-label">{escape(board_label(board))}</span>'
                 f'<span class="pm-count">{board.n_tasks}</span></a>'
             )
         for board in opens:
+            href = _href("tab=contribute", version)
             parts.append(
-                '<a class="pm-link pm-link--open" target="_self" href="?tab=contribute">'
+                f'<a class="pm-link pm-link--open" target="_self" href="{href}">'
                 f'<span class="pm-label">{escape(board.name)}</span>'
                 '<span class="pm-badge pm-badge--quiet">open</span></a>'
             )
@@ -171,8 +254,9 @@ def rail_html(
     parts.append('<div class="pm-rail-foot">')
     for tab, label in FOOT_LINKS:
         cls = "pm-foot-link pm-active" if tab == active_tab else "pm-foot-link"
+        href = _href(f"tab={tab}", CURRENT if tab == "submit" else version)
         parts.append(
-            f'<a class="{cls}" target="_self" href="?tab={tab}">{escape(label)}</a>'
+            f'<a class="{cls}" target="_self" href="{href}">{escape(label)}</a>'
         )
     parts.append("</div></div>")
     return "".join(parts)
@@ -207,10 +291,13 @@ def _leading(top) -> str:
     return "".join(parts)
 
 
-def _live_card(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
+def _live_card(
+    board: Board, df: pd.DataFrame, by_id: dict[str, dict], version: Version
+) -> str:
     top = top_models(df, by_id, board, N_TOP_MODELS)
+    href = _href(f"board={board.slug}", version)
     return (
-        f'<a class="pm-card pm-card--live" target="_self" href="?board={escape(board.slug)}">'
+        f'<a class="pm-card pm-card--live" target="_self" href="{href}">'
         f"<h3>{escape(board_label(board))}</h3>"
         f'<p class="pm-meta">{board.n_tasks} tasks · {board.n_cohorts} cohorts<br>'
         f"{board.n_patients:,} patients · {board.n_diseases} diseases</p>"
@@ -218,9 +305,10 @@ def _live_card(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
     )
 
 
-def _open_card(board: OpenBoard) -> str:
+def _open_card(board: OpenBoard, version: Version) -> str:
     return (
-        '<a class="pm-card pm-card--open" target="_self" href="?tab=contribute">'
+        '<a class="pm-card pm-card--open" target="_self" '
+        f'href="{_href("tab=contribute", version)}">'
         f"<h3>{escape(board.name)}</h3>"
         '<p class="pm-meta"><span class="pm-badge pm-badge--quiet">OPEN · no cohort yet</span></p>'
         f'<p class="pm-asks">{escape(board.blurb)}</p>'
@@ -228,7 +316,12 @@ def _open_card(board: OpenBoard) -> str:
     )
 
 
-def render_boards(boards: list[Board], df: pd.DataFrame, by_id: dict[str, dict]) -> str:
+def render_boards(
+    boards: list[Board],
+    df: pd.DataFrame,
+    by_id: dict[str, dict],
+    version: Version = CURRENT,
+) -> str:
     """The Boards overview: every board as a card, grouped by facet.
 
     Live cards link to their board and teaser their leaders; open cards state a
@@ -258,8 +351,8 @@ def render_boards(boards: list[Board], df: pd.DataFrame, by_id: dict[str, dict])
             f'<p class="pm-over">{escape(group)}</p>'
             f'<p class="pm-note">{note}{counter}</p></div><div class="pm-grid">'
         )
-        out += [_live_card(b, df, by_id) for b in cards]
-        out += [_open_card(b) for b in opens]
+        out += [_live_card(b, df, by_id, version) for b in cards]
+        out += [_open_card(b, version) for b in opens]
         out.append("</div></div>")
     out.append("</div>")
     return "".join(out)

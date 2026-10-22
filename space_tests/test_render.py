@@ -7,6 +7,7 @@ value, provenance never leaks, and public submission credits are safely escaped.
 """
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ import render
 from boards import AREA_GROUP, GROUP_NOTE, MODALITY_GROUP, build_boards, open_in_group
 from leaderboard import ELO_ANCHOR_MODEL
 from render import (
+    RELEASES_URL,
     SECTIONS,
     evaluation_confirmation,
     evaluation_status,
@@ -22,6 +24,9 @@ from render import (
     render_boards,
     render_tasks,
 )
+from versions import CURRENT
+
+from .conftest import CLOSED
 
 
 def _slugs(html: str) -> list[str]:
@@ -592,6 +597,103 @@ def test_rail_category_labels_use_consistent_authored_casing(boards):
     labels = re.findall(r'<p class="pm-rail-label">([^<]+)</p>', html)
 
     assert labels == ["Per modality", "Per therapeutic areas", "Task Category"]
+
+
+def _version_menu(html: str) -> str:
+    return re.search(r'<details class="pm-version">(.*?)</details>', html).group(1)
+
+
+def test_the_version_menu_sits_under_the_logo(boards):
+    html = rail_html(boards, None, None)
+
+    brand, menu = html.index('class="pm-brand"'), html.index('class="pm-version"')
+    assert brand < menu < html.index('class="pm-rail-section"')
+
+
+def test_the_version_menu_names_the_current_version_and_its_release_notes(boards):
+    menu = _version_menu(rail_html(boards, None, None))
+
+    assert f'Version v{CURRENT.number}</span><span class="pm-count">current' in menu
+    assert f'href="{RELEASES_URL}/{CURRENT.release}"' in menu
+    assert "version=" not in menu
+
+
+def test_the_rail_of_the_current_version_has_no_closed_notice(boards):
+    assert "pm-rail-notice" not in rail_html(boards, None, None)
+
+
+def test_the_version_menu_marks_the_version_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    menu = _version_menu(rail_html(boards, None, None, CLOSED))
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert f'Version v{CLOSED.number}</span><span class="pm-count">closed' in menu
+    assert f'class="pm-link pm-active" target="_self" href="?tab=boards{tag}"' in menu
+    assert 'class="pm-link" target="_self" href="?tab=boards"' in menu
+    assert f"from {CLOSED.opened}" in menu
+
+
+def test_a_version_switch_stays_on_the_page_on_screen(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    slug, tag = boards[0].slug, f"&amp;version={CLOSED.number}"
+
+    on_board = _version_menu(rail_html(boards, slug, None))
+    on_tasks = _version_menu(rail_html(boards, None, "tasks"))
+    on_submit = _version_menu(rail_html(boards, None, "submit"))
+
+    assert f'href="?board={slug}{tag}"' in on_board
+    assert f'href="?tab=tasks{tag}"' in on_tasks
+    assert f'href="?tab=boards{tag}"' in on_submit
+
+
+def test_a_closed_version_keeps_every_rail_link_on_it_but_submit(boards, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    html = rail_html(boards, None, "tasks", CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert set(_slugs(html.replace(tag, ""))) == {b.slug for b in boards}
+    for slug in _slugs(html.replace(tag, "")):
+        assert f'href="?board={slug}{tag}"' in html
+    assert f'href="?tab=tasks{tag}"' in html
+    assert 'href="?tab=submit"' in html
+    assert f'href="{RELEASES_URL}/{CLOSED.release}"' in html
+
+
+def test_a_closed_version_says_when_it_closed_and_links_the_current_one(
+    boards, monkeypatch
+):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, CLOSED),
+    ).group(1)
+
+    assert f"from {CLOSED.opened} to {CURRENT.opened}" in notice
+    assert f'href="?tab=boards">Go to the current version, v{CURRENT.number}' in notice
+
+
+def test_a_version_that_closed_the_day_it_opened_says_so(boards, monkeypatch):
+    same_day = replace(CLOSED, opened=CURRENT.opened)
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, same_day])
+
+    notice = re.search(
+        r'<div class="pm-rail-notice">(.*?)</div>',
+        rail_html(boards, None, None, same_day),
+    ).group(1)
+
+    assert f"from {CURRENT.opened} to {CURRENT.opened}" in notice
+
+
+def test_the_cards_of_a_closed_version_keep_it(boards, registry, results, monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    html = render_boards(boards, df, registry, CLOSED)
+    tag = f"&amp;version={CLOSED.number}"
+
+    assert {slug.removesuffix(tag) for slug in _slugs(html)} == {b.slug for b in boards}
+    assert all(slug.endswith(tag) for slug in _slugs(html))
+    assert f'href="?tab=contribute{tag}"' in html
 
 
 # ------------------------------------------------------ evaluation confirmation
