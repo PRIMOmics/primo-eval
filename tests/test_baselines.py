@@ -25,6 +25,7 @@ from baselines import (
 from scipy.sparse import csr_matrix
 
 import primomics.data
+from primomics.errors import SubmissionError
 
 
 def _adata(x: np.ndarray) -> ad.AnnData:
@@ -361,9 +362,48 @@ def test_publish_refuses_a_partial_reference(tmp_path, monkeypatch, partial):
         )
 
 
+def _hub_lists(monkeypatch: pytest.MonkeyPatch, *dataset_ids: str) -> None:
+    monkeypatch.setattr(
+        huggingface_hub.HfApi,
+        "dataset_info",
+        lambda self, repo: SimpleNamespace(sha="data123"),
+    )
+    monkeypatch.setattr(
+        baselines,
+        "fetch_manifest",
+        lambda revision: (
+            [{"id": dataset_id} for dataset_id in dataset_ids]
+            if revision == "data123"
+            else pytest.fail(f"manifest read at {revision}")
+        ),
+    )
+
+
+def test_publish_stops_when_the_hub_lists_another_dataset(tmp_path, monkeypatch):
+    _write_data(tmp_path / "data", {"d901": _adata(np.ones((4, 3)))})
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
+    _hub_lists(monkeypatch, "d901", "d902")
+    uploads = []
+    monkeypatch.setattr(
+        baselines, "upload_hvg_reference", lambda path, token: uploads.append(path)
+    )
+
+    with pytest.raises(SystemExit, match=r"Missing from the download: \['d902'\]"):
+        _main(
+            monkeypatch,
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--publish",
+        )
+    assert uploads == []
+
+
 def test_publish_stops_when_the_data_changed_on_the_hub(tmp_path, monkeypatch):
     _write_data(tmp_path / "data", {"d901": _adata(np.ones((4, 3)))})
     monkeypatch.setenv("HF_TOKEN", "hf_test")
+    _hub_lists(monkeypatch, "d901")
     monkeypatch.setattr(
         primomics.data, "changed_datasets", lambda data_dir, entries: ["d901"]
     )
@@ -393,11 +433,7 @@ def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
     monkeypatch.setattr(
         primomics.data, "changed_datasets", lambda data_dir, entries: []
     )
-    monkeypatch.setattr(
-        huggingface_hub.HfApi,
-        "dataset_info",
-        lambda self, repo: SimpleNamespace(sha="data123"),
-    )
+    _hub_lists(monkeypatch, "d901")
     uploads = []
     monkeypatch.setattr(
         baselines,
@@ -420,3 +456,8 @@ def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
 
     assert uploads == [tmp_path / "out" / "submission_HVG-1200-genes.parquet"]
     assert "data data123, reference ref456" in caplog.text
+
+
+def test_a_folder_without_a_download_is_refused(tmp_path):
+    with pytest.raises(SubmissionError, match="run primo download first"):
+        build_submission(tmp_path, BaselineConfig("raw"))

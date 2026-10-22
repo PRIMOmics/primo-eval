@@ -51,7 +51,6 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
-import yaml
 from sklearn.decomposition import PCA
 
 SPACE_DIR = Path(__file__).resolve().parents[1] / "space"
@@ -70,9 +69,11 @@ from evaluator import (
     SAMPLE_ID,
     TARGETS_FILENAME,
     TASKS_FILENAME,
+    fetch_manifest,
     load_labels,
     load_targets,
     load_tasks_registry,
+    manifest_ids,
     score_all,
 )
 from results import HVG_REFERENCE_MODEL, upload_hvg_reference
@@ -174,9 +175,10 @@ def embed(adata: ad.AnnData, config: BaselineConfig) -> np.ndarray:
 
 
 def load_manifest(data_dir: Path, modality: str | None = None) -> list[dict]:
-    """Read ``datasets.yaml``, keeping one modality's datasets when one is given."""
-    data = yaml.safe_load((data_dir / MANIFEST_FILENAME).read_text())
-    entries = data.get("datasets", []) if isinstance(data, dict) else (data or [])
+    """The downloaded ``datasets.yaml``, keeping one modality's datasets if given."""
+    from primomics.data import local_manifest
+
+    entries = local_manifest(data_dir)
     if modality is None:
         return entries
     return [entry for entry in entries if entry.get("modality") == MODALITIES[modality]]
@@ -292,22 +294,33 @@ def score_submission(
 
 
 def check_data_is_current(data_dir: Path) -> str:
-    """Return the commit of the data on the Hub, or stop if a dataset changed.
+    """Return the commit of the data on the Hub, or stop if the download differs.
 
     The reference features must be built from the data that a board version
-    pins, so every downloaded file has to be the one on the Hub today.
+    pins, so the download has to hold every dataset that the Hub lists at that
+    commit, each with the file of the Hub today.
     """
     from huggingface_hub import HfApi
 
     from primomics.data import changed_datasets
 
-    changed = changed_datasets(data_dir, load_manifest(data_dir))
+    commit = HfApi().dataset_info(PUBLIC_REPO).sha
+    entries = load_manifest(data_dir)
+    listed = manifest_ids(fetch_manifest(revision=commit))
+    downloaded = manifest_ids(entries)
+    if listed != downloaded:
+        raise SystemExit(
+            "--publish needs the datasets that the Hub lists. Missing from the "
+            f"download: {sorted(listed - downloaded)}; no longer on the Hub: "
+            f"{sorted(downloaded - listed)}. Run primo download, then publish again."
+        )
+    changed = changed_datasets(data_dir, entries)
     if changed:
         raise SystemExit(
             f"--publish needs the data of the Hub, and these datasets changed since "
             f"primo download: {changed}. Run primo download, then publish again."
         )
-    return HfApi().dataset_info(PUBLIC_REPO).sha
+    return commit
 
 
 def publish_reference(config: BaselineConfig, path: Path, token: str | None) -> str:
