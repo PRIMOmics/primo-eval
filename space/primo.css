@@ -249,6 +249,8 @@ a:hover { color: var(--marine-700); }
 #pm-main .pm-hvg-toggle:not(:checked) ~ .pm-group .pm-with-hvg,
 #pm-main .pm-private-toggle:checked ~ .pm-group .pm-all-tasks,
 #pm-main .pm-private-toggle:not(:checked) ~ .pm-group .pm-private-tasks { display: none; }
+#pm-main:has(.pm-private-toggle:checked) .pm-head .pm-all-tasks,
+#pm-main:has(.pm-private-toggle:not(:checked)) .pm-head .pm-private-tasks { display: none; }
 .pm-table .pm-num { text-align: right; font-family: var(--font-mono); font-size: 13px; color: var(--text-body); }
 .pm-table .pm-num--dim { color: var(--n-400); }
 .pm-table .pm-sd { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; line-height: 1.2; white-space: nowrap; }

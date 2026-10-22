@@ -641,6 +641,15 @@ def _variant(html: str, *classes: str) -> str:
     return f'<div class="{names}">{html}</div>' if names else html
 
 
+def _head_meta(board: Board, by_id: dict[str, dict]) -> str:
+    """The board's numbers once per scope; ``primo.css`` shows the ticked one."""
+    lines = []
+    for scope, scoped in _scope_states(board, by_id):
+        cls = f' class="{scope}"' if scope else ""
+        lines.append(f"<p{cls}>{_board_meta(scoped)}</p>")
+    return "".join(lines)
+
+
 def _board_body(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
     """The switches, then the ranked leaderboard and the per-task table.
 
@@ -692,7 +701,7 @@ def render_board(board: Board | None, df: pd.DataFrame, by_id: dict[str, dict]) 
     return (
         '<div class="pm-head"><div><p class="pm-over">Board</p>'
         f"<h1>{escape(board_label(board))}</h1>"
-        f"<p>{_board_meta(board)}</p></div></div>"
+        f"{_head_meta(board, by_id)}</div></div>"
         f'<div class="pm-body">{_board_body(board, df, by_id)}</div>'
     )
 

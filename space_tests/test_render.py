@@ -415,6 +415,11 @@ def test_switch_css_hides_the_unselected_variants():
     assert (
         "#pm-main .pm-private-toggle:not(:checked) ~ .pm-group .pm-private-tasks" in css
     )
+    assert "#pm-main:has(.pm-private-toggle:checked) .pm-head .pm-all-tasks" in css
+    assert (
+        "#pm-main:has(.pm-private-toggle:not(:checked)) .pm-head .pm-private-tasks"
+        in css
+    )
 
 
 def test_a_board_without_hvg_entries_has_no_toggle(registry, named, results):
@@ -469,6 +474,17 @@ def test_only_private_tasks_ranks_a_model_that_skipped_only_public_ones(
     assert eva_ranked in ranked["pm-private-tasks"]
     assert "Psoriasis PASI" in per_task["pm-all-tasks"]
     assert "Psoriasis PASI" not in per_task["pm-private-tasks"]
+
+
+def test_the_header_counts_follow_the_private_toggle(registry, named, results):
+    html = render_board(named("bulk RNA"), results(), registry)
+    head = html.split('<div class="pm-body">')[0]
+
+    every_task = re.search(r'<p class="pm-all-tasks">([^<]*)</p>', head).group(1)
+    private = re.search(r'<p class="pm-private-tasks">([^<]*)</p>', head).group(1)
+
+    assert "5 tasks · 4 cohorts · 350 patients" in every_task
+    assert "4 tasks · 3 cohorts · 270 patients" in private
 
 
 def test_private_toggle_only_on_boards_mixing_public_and_private_tasks(
