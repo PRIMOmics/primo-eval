@@ -125,6 +125,18 @@ release PR. Deploy soon after it: until the deploy, the quickstart and
 `primo download` already read the new data, and the live Space refuses a file with
 a dataset that its version does not list.
 
+### Open version 0.1
+
+Version `0.1` is the first board version. The rows written before versions existed
+carry none, so this version opens once, by hand:
+
+1. In `task_results.csv`, set `version` to `0.1` on every row with a `submitted_at`
+   of `2026-10-19 15:22:47` or later. These rows hold the scores of version `0.1`.
+2. Run `rescore.py --from legacy --publish`, as in step 3 above. It scores again,
+   into version `0.1`, the live entries that step 1 did not tag.
+3. Deploy the release, then repeat step 1 for the rows written before the deploy.
+4. Tag the commits of version `0.1` `v0.1` on the three Hub dataset repos.
+
 ## Deploy the Space
 
 The leaderboard Space runs the `space/` folder of a release, so the rows of a board

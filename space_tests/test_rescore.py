@@ -25,6 +25,8 @@ from results import (
 )
 from versions import CURRENT
 
+from .conftest import CLOSED
+
 TASKS = {"t901", "t902", "t903"}
 DAY_1 = "2026-01-01 00:00:00.000000"
 DAY_2 = "2026-01-02 00:00:00.000000"
@@ -136,6 +138,22 @@ def test_a_submission_made_after_the_first_run_is_carried():
     assert [carry.submission_id for carry in carries] == ["s2"]
 
 
+def test_a_later_row_on_another_task_does_not_skip_a_submission():
+    new = _rows(("eva", "t903", DAY_2, "s2"))
+
+    carries, _ = carried(EVA, new, [EVA_ARCHIVE], TASKS, set())
+
+    assert [carry.held for carry in carries] == [{"t901", "t902"}]
+
+
+def test_a_submission_is_carried_on_the_tasks_no_later_row_holds():
+    new = _rows(("eva", "t901", DAY_2, "s2"))
+
+    carries, _ = carried(EVA, new, [EVA_ARCHIVE], TASKS, set())
+
+    assert [carry.held for carry in carries] == [{"t902"}]
+
+
 def test_a_plus_hvg_entry_is_not_carried_on_its_own():
     old = pd.concat([EVA, _rows((hvg_name("eva"), "t901", DAY_1, "s1"))])
 
@@ -184,12 +202,11 @@ def test_the_baseline_is_carried_from_the_reference():
     assert carried(old, old, [], TASKS, set()) == ([], [])
 
 
-def test_an_archive_reads_its_representation_from_its_manifest():
-    assert representation_of({"model_name": "eva"}) == EMBEDDING
-    assert representation_of({"model_name": "COMPASS"}) == GENE_SPACE
-    assert representation_of(
-        {"model_name": "COMPASS", "representation": EMBEDDING}
-    ) == (EMBEDDING)
+def test_an_archive_without_a_representation_is_read_as_an_embedding():
+    assert representation_of({"model_name": "m"}) == EMBEDDING
+    assert representation_of({"model_name": "m", "representation": GENE_SPACE}) == (
+        GENE_SPACE
+    )
 
 
 def _submission(path, *dataset_ids):
@@ -342,10 +359,12 @@ def test_a_held_task_without_a_row_is_lost_with_all_tasks_too():
     assert lost_tasks(carry, SCORED[:3]) == ["t902"]
 
 
-def _patch_main(monkeypatch, tmp_path, score) -> list:
+def _patch_main(
+    monkeypatch, tmp_path, score, argv=("--from", "legacy", "--publish")
+) -> list:
     published = []
     monkeypatch.setenv("HF_TOKEN", "token")
-    monkeypatch.setattr(sys, "argv", ["rescore.py", "--from", "legacy", "--publish"])
+    monkeypatch.setattr(sys, "argv", ["rescore.py", *argv])
     monkeypatch.setattr(rescore, "fetch_manifest", lambda token: [{"id": "d901"}])
     monkeypatch.setattr(rescore, "fetch_tasks_registry", lambda token: REGISTRY)
     monkeypatch.setattr(rescore, "read_results", lambda token: EVA)
@@ -379,3 +398,49 @@ def test_a_failed_entry_stops_the_publish(tmp_path, monkeypatch, score):
         rescore.main()
 
     assert published == []
+
+
+def test_a_dry_run_scores_and_publishes_nothing(tmp_path, monkeypatch):
+    published = _patch_main(
+        monkeypatch,
+        tmp_path,
+        lambda *args: pytest.fail("a dry run scored an entry"),
+        ("--from", "legacy", "--publish", "--dry-run"),
+    )
+
+    rescore.main()
+
+    assert published == []
+
+
+def test_a_version_rescore_reads_the_old_pins_and_adds_the_new_tasks(
+    tmp_path, monkeypatch
+):
+    carries, revisions = [], []
+
+    def score(carry, *args):
+        carries.append(carry)
+        return SCORED
+
+    def registry(token, revision=CURRENT.labels):
+        revisions.append(revision)
+        return REGISTRY if revision == CURRENT.labels else REGISTRY[:1]
+
+    published = _patch_main(
+        monkeypatch, tmp_path, score, ("--from", CLOSED.number, "--publish")
+    )
+    old = _rows(("eva", "t901", DAY_1, "s1")).assign(**{VERSION: CLOSED.number})
+    monkeypatch.setattr(rescore, "VERSIONS", [CURRENT, CLOSED])
+    monkeypatch.setattr(rescore, "fetch_tasks_registry", registry)
+    monkeypatch.setattr(
+        rescore, "fetch_manifest", lambda token, revision=None: [{"id": "d901"}]
+    )
+    monkeypatch.setattr(rescore, "read_results", lambda token: old)
+
+    rescore.main()
+
+    assert revisions == [CURRENT.labels, CLOSED.labels]
+    assert [(carry.held, carry.task_ids) for carry in carries] == [
+        ({"t901"}, {"t901", "t902"})
+    ]
+    assert published == [SCORED]

@@ -15,9 +15,11 @@ the old version, on a task that still exists.
   covers instead.
 - The datasets the current manifest no longer lists are dropped from the file,
   because ``score_all`` would refuse the whole file.
-- A submission is skipped when the current version already holds rows of its
-  entry from the same time or later. A second run after the deploy then only
-  picks up the submissions made in between.
+- A submission is scored again only on the tasks where the current version holds
+  no row of its entry from the same time or later. A second run after the deploy
+  then only picks up the submissions made in between.
+- An archive whose manifest records no representation is read as an embedding,
+  as the Space scored it.
 - An entry that fails, or that gets no score on a task it held, stops the run
   before anything is published, with or without ``--all-tasks``. To publish the
   others, rerun with ``--models`` and the entries to keep.
@@ -80,7 +82,6 @@ from results import (
 from versions import CURRENT, VERSIONS
 
 LEGACY = "legacy"
-LEGACY_GENE_SPACE = ("COMPASS",)
 CREDITS = (OWNER, INSTITUTION, IS_AUTHOR_SUBMISSION, PAPER_LINK)
 
 
@@ -106,19 +107,39 @@ class Carry:
 
 
 def representation_of(manifest: dict) -> str:
-    """How to read an archive: from its manifest, or from the legacy list."""
-    if "representation" in manifest:
-        return manifest["representation"]
-    return GENE_SPACE if manifest["model_name"] in LEGACY_GENE_SPACE else EMBEDDING
+    """How to read an archive: as its manifest says, else as an embedding."""
+    return manifest.get("representation", EMBEDDING)
 
 
-def _held_since(rows: pd.DataFrame, model: str, is_baseline: bool, since: str) -> bool:
-    """Whether ``rows`` hold the entry ``model`` from ``since`` or later."""
-    flagged = with_baseline_flag(rows)
-    own = flagged[
-        (flagged[MODEL_NAME] == model) & (flagged[IS_BASELINE] == is_baseline)
+def _slots(rows: pd.DataFrame) -> list[tuple[str, bool, str]]:
+    """The ``(model, is_baseline, task)`` slot of each row."""
+    return [
+        (str(model), bool(is_baseline), _norm_id(task_id))
+        for model, is_baseline, task_id in zip(
+            rows[MODEL_NAME], rows[IS_BASELINE], rows[TASK_ID]
+        )
     ]
-    return bool((own["submitted_at"].astype(str) >= since).any())
+
+
+def _newest(rows: pd.DataFrame) -> dict[tuple[str, bool, str], str]:
+    """The newest ``submitted_at`` of each slot of ``rows``."""
+    flagged = with_baseline_flag(rows)
+    newest = {}
+    for slot, date in zip(_slots(flagged), flagged["submitted_at"].astype(str)):
+        newest[slot] = max(newest.get(slot, ""), date)
+    return newest
+
+
+def _open_rows(
+    rows: pd.DataFrame, newest: dict, since: str | None = None
+) -> pd.DataFrame:
+    """The ``rows`` whose slot holds no row from ``since`` or later in ``newest``.
+
+    Without ``since``, each row is compared with its own date.
+    """
+    dates = rows["submitted_at"].astype(str) if since is None else [since] * len(rows)
+    keep = [newest.get(slot, "") < date for slot, date in zip(_slots(rows), dates)]
+    return rows[pd.Series(keep, index=rows.index, dtype=bool)]
 
 
 def _task_set(
@@ -146,13 +167,15 @@ def carried(
     plain = live[
         ~live[IS_BASELINE] & ~live[MODEL_NAME].astype(str).str.endswith(HVG_TAG)
     ]
+    newest = _newest(new)
     carries = []
     for manifest in manifests:
         model, submission_id = manifest["model_name"], manifest["submission_id"]
         rows = plain[
             (plain[SUBMISSION_ID] == submission_id) & (plain[MODEL_NAME] == model)
         ]
-        if rows.empty or _held_since(new, model, False, manifest["submitted_at"]):
+        rows = _open_rows(rows, newest, manifest["submitted_at"])
+        if rows.empty:
             continue
         parent = rows.iloc[-1]
         held = frozenset(rows[TASK_ID].map(_norm_id))
@@ -174,15 +197,16 @@ def carried(
     orphans = sorted(
         {
             row[MODEL_NAME]
-            for _, row in plain.iterrows()
+            for slot, (_, row) in zip(_slots(plain), plain.iterrows())
             if (row[MODEL_NAME], row[SUBMISSION_ID]) not in archived
-            and not _held_since(new, row[MODEL_NAME], False, str(row["submitted_at"]))
+            and newest.get(slot, "") < str(row["submitted_at"])
         }
     )
     baseline = live[live[IS_BASELINE] & (live[MODEL_NAME] == HVG_REFERENCE_MODEL)]
     if not baseline.empty:
         since = str(baseline["submitted_at"].astype(str).max())
-        if not _held_since(new, HVG_REFERENCE_MODEL, True, since):
+        baseline = _open_rows(baseline, newest)
+        if not baseline.empty:
             held = frozenset(baseline[TASK_ID].map(_norm_id))
             carries.append(
                 Carry(
