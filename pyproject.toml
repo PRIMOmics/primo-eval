@@ -1,6 +1,6 @@
 [project]
 name = "primomics"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Evaluation harness, task specs and baselines for the PRIMO benchmark"
 readme = "README.md"
 license = "Apache-2.0"

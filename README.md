@@ -20,7 +20,7 @@ tasks and submits your embeddings. The Python package is `primomics`.
 🏆 [Leaderboard](https://huggingface.co/spaces/PRIMOmics/primo-eval) ·
 📦 [Data](https://huggingface.co/datasets/PRIMOmics/primo)
 
-🚧 Work in progress: nothing here is stable yet.
+🚧 Before version 1.0, scores can change from one minor version to the next (0.1 → 0.2).
 
 ## 🚀 From install to the leaderboard
 
