@@ -6,9 +6,10 @@ HVG-1200 log-normalized linear baseline (`HVG-1200-genes`) scored.
 features, scored automatically with every submission: they show what the model
 adds on top of expression.
 
-One column per task family, each in its own metric. **Mean** is the average of
-those columns: it orders the table, but it averages AUROC, Pearson and residual
-Spearman, so read it as a tie-break and compare models on the family columns.
+One column per task family, each in its own metric. **Mean score** is the
+average of the model's scores on the tasks of the board. Elo orders the table,
+not this mean. When a board holds more than one metric, this mean mixes them,
+so compare models on the family columns.
 
 **Submissions count** is the most times any *single* task result of that model was
 resubmitted — not how many files were uploaded. A model that covered twenty tasks

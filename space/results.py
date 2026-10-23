@@ -21,11 +21,16 @@ Rows written before these columns existed carry no column at all, so every
 reader normalises the baseline flag, ownership, public credits and submission
 identity. Missing legacy public-credit values remain private.
 
+Each row records the board ``version`` whose harness scored it, which is always
+the current version of this code. A board shows only the rows of its version.
+Rows written before versions existed carry none and are shown on no board.
+
 Every submission is also scored concatenated with our ``HVG-1200-genes``
 baseline features and stored as a second entry, ``<model> + HVG``, sharing the
 parent's owner, credits and submission id. It shows what a model adds on top of
 plain expression. The features live privately at ``HVG_REFERENCE_FILE``, next
-to the results, so they always match the published anchor.
+to the results. They are read at the commit the board version pins, so a new
+upload is used only once a release pins it.
 """
 
 import hashlib
@@ -34,7 +39,8 @@ import json
 from pathlib import Path
 
 import pandas as pd
-from evaluator import RESULTS_REPO, load_submission
+from evaluator import EMBEDDING, RESULTS_REPO, load_submission
+from versions import CURRENT
 
 RESULTS_FILE = "task_results.csv"
 SUBMISSIONS_FILE = "submissions.csv"
@@ -47,6 +53,7 @@ LEGACY_TEAM = "team"
 IS_AUTHOR_SUBMISSION = "is_author_submission"
 PAPER_LINK = "paper_link"
 SUBMISSION_ID = "submission_id"
+VERSION = "version"
 
 RESULT_COLUMNS = [
     MODEL_NAME,
@@ -61,6 +68,7 @@ RESULT_COLUMNS = [
     IS_AUTHOR_SUBMISSION,
     PAPER_LINK,
     SUBMISSION_ID,
+    VERSION,
 ]
 SUBMISSION_COLUMNS = [
     MODEL_NAME,
@@ -80,6 +88,8 @@ BASELINE_TAG = "(baseline)"
 HVG_TAG = "+ HVG"
 HVG_REFERENCE_MODEL = "HVG-1200-genes"
 HVG_REFERENCE_FILE = f"baselines/{HVG_REFERENCE_MODEL}/submission.parquet"
+ARCHIVE_DIR = "models"
+ARCHIVE_MANIFEST = "manifest.json"
 
 
 def with_baseline_flag(df: pd.DataFrame) -> pd.DataFrame:
@@ -113,6 +123,17 @@ def with_institution(df: pd.DataFrame) -> pd.DataFrame:
 def with_submission_id(df: pd.DataFrame) -> pd.DataFrame:
     """Guarantee a submission id; legacy rows fall back to their timestamp."""
     return _with_text_column(df, SUBMISSION_ID)
+
+
+def with_version(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee a board-version column; legacy rows have the empty version."""
+    return _with_text_column(df, VERSION)
+
+
+def version_rows(df: pd.DataFrame, number: str) -> pd.DataFrame:
+    """The rows that board version ``number`` scored."""
+    versioned = with_version(df)
+    return versioned[versioned[VERSION] == number]
 
 
 def with_paper_link(df: pd.DataFrame) -> pd.DataFrame:
@@ -174,34 +195,42 @@ def without_hvg(df: pd.DataFrame) -> pd.DataFrame:
     return df[~df[MODEL_NAME].astype(str).str.endswith(f" {HVG_TAG}")]
 
 
-def fetch_hvg_reference(token: str | None) -> Path:
+def fetch_hvg_reference(token: str | None, revision: str = CURRENT.reference) -> Path:
     """Local path to the HVG-1200 features every submission is concatenated with."""
     from huggingface_hub import hf_hub_download
 
     return Path(
         hf_hub_download(
-            RESULTS_REPO, HVG_REFERENCE_FILE, repo_type="dataset", token=token
+            RESULTS_REPO,
+            HVG_REFERENCE_FILE,
+            repo_type="dataset",
+            token=token,
+            revision=revision,
         )
     )
 
 
-def upload_hvg_reference(path: str | Path, token: str | None) -> None:
-    """Replace the HVG-1200 features with the ones just published as baseline."""
+def upload_hvg_reference(path: str | Path, token: str | None) -> str:
+    """Replace the HVG-1200 features; return the commit that holds them, to pin."""
     from huggingface_hub import HfApi
 
-    HfApi(token=token).upload_file(
-        path_or_fileobj=str(path),
-        path_in_repo=HVG_REFERENCE_FILE,
-        repo_id=RESULTS_REPO,
-        repo_type="dataset",
-        commit_message="Update HVG-1200 reference features",
+    return (
+        HfApi(token=token)
+        .upload_file(
+            path_or_fileobj=str(path),
+            path_in_repo=HVG_REFERENCE_FILE,
+            repo_id=RESULTS_REPO,
+            repo_type="dataset",
+            commit_message="Update HVG-1200 reference features",
+        )
+        .oid
     )
 
 
 def task_rows(
     model: str, result: dict, submitted_at: str, submission_id: str, credits: dict
 ) -> list[dict]:
-    """One leaderboard row per task scored in ``result``, credited by ``credits``."""
+    """One row per task scored in ``result``, credited and tagged with this version."""
     return [
         {
             MODEL_NAME: model,
@@ -216,6 +245,7 @@ def task_rows(
             "submitted_at": submitted_at,
             IS_BASELINE: False,
             SUBMISSION_ID: submission_id,
+            VERSION: CURRENT.number,
             **credits,
         }
         for task in result["per_task"]
@@ -231,7 +261,7 @@ def read_csv(filename: str, columns: list[str], token: str | None) -> pd.DataFra
         path = hf_hub_download(RESULTS_REPO, filename, repo_type="dataset", token=token)
     except (RepositoryNotFoundError, EntryNotFoundError):
         return pd.DataFrame(columns=columns)
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype={VERSION: str})
 
 
 def upload_csv(filename: str, df: pd.DataFrame, token: str | None) -> None:
@@ -251,12 +281,22 @@ def upload_csv(filename: str, df: pd.DataFrame, token: str | None) -> None:
     )
 
 
+def archive_paths(submission_id: str, source_format: str) -> tuple[str, str]:
+    """Where a submission's file and its manifest are archived in the results repo."""
+    prefix = f"{ARCHIVE_DIR}/{submission_id}"
+    return (
+        f"{prefix}/submission{source_format or '.bin'}",
+        f"{prefix}/{ARCHIVE_MANIFEST}",
+    )
+
+
 def _embedding_manifest(
     path: str | Path,
     model_name: str,
     submission_id: str,
     modality: str,
     submitted_at: str,
+    representation: str = EMBEDDING,
 ) -> tuple[dict, bytes]:
     """Build a privacy-preserving manifest for an embedding submission."""
     source = Path(path)
@@ -278,6 +318,7 @@ def _embedding_manifest(
         "submission_id": submission_id,
         "submitted_at": submitted_at,
         "modality": modality,
+        "representation": representation,
         "source_format": source.suffix.lower(),
         "sha256": digest.hexdigest(),
         "size_bytes": source.stat().st_size,
@@ -295,26 +336,23 @@ def archive_submission(
     modality: str,
     submitted_at: str,
     token: str | None,
+    representation: str = EMBEDDING,
 ) -> None:
     """Archive an embedding file and its manifest in the private results dataset."""
     from huggingface_hub import CommitOperationAdd, HfApi
 
     source = Path(path)
     _, manifest_bytes = _embedding_manifest(
-        source, model_name, submission_id, modality, submitted_at
+        source, model_name, submission_id, modality, submitted_at, representation
     )
-    prefix = f"models/{submission_id}"
-    archive_suffix = source.suffix.lower() or ".bin"
+    file_path, manifest_path = archive_paths(submission_id, source.suffix.lower())
     HfApi(token=token).create_commit(
         repo_id=RESULTS_REPO,
         repo_type="dataset",
         operations=[
+            CommitOperationAdd(path_in_repo=file_path, path_or_fileobj=source),
             CommitOperationAdd(
-                path_in_repo=f"{prefix}/submission{archive_suffix}",
-                path_or_fileobj=source,
-            ),
-            CommitOperationAdd(
-                path_in_repo=f"{prefix}/manifest.json", path_or_fileobj=manifest_bytes
+                path_in_repo=manifest_path, path_or_fileobj=manifest_bytes
             ),
         ],
         commit_message=f"Archive embedding submission {submission_id}",
@@ -322,14 +360,16 @@ def archive_submission(
 
 
 def read_results(token: str | None) -> pd.DataFrame:
-    """Every persisted task score, with baseline and credit fields normalised."""
-    return with_submission_id(
-        with_paper_link(
-            with_author_submission_flag(
-                with_institution(
-                    with_owner(
-                        with_baseline_flag(
-                            read_csv(RESULTS_FILE, RESULT_COLUMNS, token)
+    """Every persisted task score, with baseline, credit and version normalised."""
+    return with_version(
+        with_submission_id(
+            with_paper_link(
+                with_author_submission_flag(
+                    with_institution(
+                        with_owner(
+                            with_baseline_flag(
+                                read_csv(RESULTS_FILE, RESULT_COLUMNS, token)
+                            )
                         )
                     )
                 )
@@ -345,10 +385,12 @@ def append_results(rows: list[dict], token: str | None) -> None:
     df = pd.concat([read_results(token), pd.DataFrame(rows)], ignore_index=True)
     upload_csv(
         RESULTS_FILE,
-        with_submission_id(
-            with_paper_link(
-                with_author_submission_flag(
-                    with_institution(with_owner(with_baseline_flag(df)))
+        with_version(
+            with_submission_id(
+                with_paper_link(
+                    with_author_submission_flag(
+                        with_institution(with_owner(with_baseline_flag(df)))
+                    )
                 )
             )
         ),

@@ -47,4 +47,4 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["space"]
+pythonpath = ["space", "scripts"]

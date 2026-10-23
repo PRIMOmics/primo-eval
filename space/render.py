@@ -18,8 +18,9 @@ Two rules hold everywhere:
 Navigation is reload-based: the rail is a column of ``<a href="?board=slug">``
 and ``<a href="?tab=name">`` links, which costs a page load per click but buys
 shareable per-board URLs and needs no JavaScript, matching how the board cards
-have always worked. ``&view=private`` switches to the private view, which leaves
-the public tasks out; every link carries it, so the view survives navigation.
+have always worked. On a closed board version, every link adds
+``&version=<number>`` so the visitor stays on it, except Submit: a submission
+always goes to the current version.
 """
 
 import math
@@ -33,7 +34,6 @@ from boards import (
     CATEGORY_GROUP,
     GROUP_NOTE,
     MODALITY_GROUP,
-    PUBLIC,
     Board,
     OpenBoard,
     board_label,
@@ -52,21 +52,14 @@ from leaderboard import (
     top_models,
 )
 from results import without_hvg
+from versions import CURRENT, VERSIONS, Version
 
 SECTIONS = (MODALITY_GROUP, AREA_GROUP, CATEGORY_GROUP)
 MEDALS = ("🥇", "🥈", "🥉")
 N_TOP_MODELS = len(MEDALS)
 
-VIEW_PARAM = "view"
-PRIVATE_VIEW = "private"
-VIEWS = (("All tasks", False), ("Private tasks", True))
-ALL_PUBLIC = "Every task of this board is public."
-
-BRAND = (
-    '<a class="pm-brand" target="_self" href="{href}">'
-    '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
-    "<b>PRIMO</b><span>benchmark</span></a>"
-)
+VERSION_PARAM = "version"
+RELEASES_URL = "https://github.com/PRIMOmics/primo-eval/releases/tag"
 
 FOOT_LINKS = (
     ("tasks", "Tasks"),
@@ -78,7 +71,7 @@ FOOT_LINKS = (
 NAME_COLUMNS = frozenset({"Model", "Best"})
 STRONG_COLUMNS = frozenset({"Task"})
 METRIC_COLUMNS = frozenset({"Metric"})
-RIGHT_COLUMNS = frozenset({"Rank", "Patients"})
+RIGHT_COLUMNS = frozenset({"Rank", "Patients", "Submissions count"})
 METRIC_GUIDES = {
     "AUROC": "Range: 0 to 1 · Random predictor: 0.5",
     "Pearson": "Range: -1 to 1 · Random predictor: 0 (expected)",
@@ -129,41 +122,89 @@ CHEVRON = (
 )
 
 
-# --------------------------------------------------------------------- view
-def _href(query: str, private: bool) -> str:
-    """A link to ``?query`` that keeps the private view on."""
-    view = f"&{VIEW_PARAM}={PRIVATE_VIEW}" if private else ""
-    return escape(f"?{query}{view}", quote=True)
-
-
-def _in_view(board: Board, by_id: dict[str, dict], private: bool) -> Board:
-    """The board as the current view shows it."""
-    return without_public(board, by_id) if private else board
-
-
-def _view_switch(query: str, private: bool) -> str:
-    """The All tasks / Private tasks toggle of the page at ``?query``."""
-    links = []
-    for label, view in VIEWS:
-        active = ' class="pm-active" aria-current="page"' if view == private else ""
-        links.append(
-            f'<a{active} target="_self" href="{_href(query, view)}">{label}</a>'
-        )
-    return (
-        '<nav class="pm-toggle" aria-label="Tasks included" title="Private tasks '
-        f'leave out the tasks whose labels are public">{"".join(links)}</nav>'
-    )
+def _href(query: str, version: Version = CURRENT) -> str:
+    """A reload link that stays on ``version``; the current one needs no tag."""
+    if version != CURRENT:
+        query = f"{query}&{VERSION_PARAM}={version.number}"
+    return escape(f"?{query}")
 
 
 # --------------------------------------------------------------------- rail
+def _brand(version: Version) -> str:
+    return (
+        f'<a class="pm-brand" target="_self" href="{_href("tab=boards", version)}">'
+        '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
+        "<b>PRIMO</b><span>benchmark</span></a>"
+    )
+
+
+def _number(version: Version) -> tuple[int, ...]:
+    """The version number as integers, so ``0.10`` comes after ``0.9``."""
+    return tuple(int(part) for part in version.number.split("."))
+
+
+def _closed_on(version: Version) -> str:
+    """The day the version after ``version`` opened."""
+    later = [listed for listed in VERSIONS if _number(listed) > _number(version)]
+    return min(later, key=_number).opened
+
+
+def _closed_notice(version: Version) -> str:
+    """On a closed version, say so and link back to the current one."""
+    if version == CURRENT:
+        return ""
+    return (
+        '<div class="pm-rail-notice">'
+        f"<b>Version v{escape(version.number)} is closed</b>"
+        f"<span>Its scores, from {escape(version.opened)} to "
+        f"{escape(_closed_on(version))}, are kept read-only.</span>"
+        f'<a target="_self" href="{_href("tab=boards")}">'
+        f"Go to the current version, v{escape(CURRENT.number)}</a></div>"
+    )
+
+
+def _page_query(active_slug: str | None, active_tab: str | None) -> str:
+    """The page on screen, so a version switch stays on it; Submit goes to Boards."""
+    if active_slug:
+        return f"board={active_slug}"
+    if active_tab and active_tab != "submit":
+        return f"tab={active_tab}"
+    return "tab=boards"
+
+
+def _version_menu(version: Version, page: str) -> str:
+    """The dropdown under the logo: every version, then the release notes."""
+    state = "current" if version == CURRENT else "closed"
+    parts = [
+        '<details class="pm-version"><summary class="pm-version-summary">'
+        f'<span class="pm-label">Version v{escape(version.number)}</span>'
+        f'<span class="pm-count">{state}</span>{CHEVRON}</summary>',
+        '<div class="pm-version-list">',
+    ]
+    for listed in VERSIONS:
+        cls = "pm-link pm-active" if listed == version else "pm-link"
+        note = "current" if listed == CURRENT else f"from {listed.opened}"
+        parts.append(
+            f'<a class="{cls}" target="_self" href="{_href(page, listed)}">'
+            f'<span class="pm-label">v{escape(listed.number)}</span>'
+            f'<span class="pm-count">{escape(note)}</span></a>'
+        )
+    notes = escape(f"{RELEASES_URL}/{version.release}")
+    parts.append(
+        f'<a class="pm-link" target="_blank" rel="noopener" href="{notes}">'
+        '<span class="pm-label">Release notes</span>'
+        f'<span class="pm-count">{escape(version.release)}</span></a></div></details>'
+    )
+    return "".join(parts)
+
+
 def rail_html(
     boards: list[Board],
-    by_id: dict[str, dict],
     active_slug: str | None,
     active_tab: str | None,
-    private: bool,
+    version: Version = CURRENT,
 ) -> str:
-    """The left navigation: brand, a collapsible "Boards" menu, then the foot links.
+    """The left navigation: brand, version menu, "Boards" menu, then the foot links.
 
     The board groups live inside a ``<details>`` toggle so the four foot links
     (Tasks, Submit, Contribute, Method) stay visible without scrolling. The toggle
@@ -172,13 +213,16 @@ def rail_html(
     ``active_slug`` highlights the board a visitor is on; ``active_tab`` highlights
     a foot link, and its absence means we are on a board or the overview, so the
     "Boards" menu is the active one. Open boards link to Contribute, mirroring the
-    overview cards. Counts follow the view.
+    overview cards. ``version`` is the board version on screen; the version menu
+    under the brand switches it and stays on the same page.
     """
     on_boards = active_tab is None
     summary_cls = "pm-rail-summary pm-active" if on_boards else "pm-rail-summary"
     parts = [
         '<div class="pm-rail-inner">',
-        BRAND.format(href=_href("tab=boards", private)),
+        _brand(version),
+        _version_menu(version, _page_query(active_slug, active_tab)),
+        _closed_notice(version),
         '<details class="pm-rail-section" open>',
         f'<summary class="{summary_cls}"><span>Boards</span>{CHEVRON}</summary>',
         '<div class="pm-rail-sections">',
@@ -192,17 +236,16 @@ def rail_html(
         )
         for board in cards:
             cls = "pm-link pm-active" if board.slug == active_slug else "pm-link"
-            count = _in_view(board, by_id, private).n_tasks
+            href = _href(f"board={board.slug}", version)
             parts.append(
-                f'<a class="{cls}" target="_self" '
-                f'href="{_href(f"board={board.slug}", private)}">'
+                f'<a class="{cls}" target="_self" href="{href}">'
                 f'<span class="pm-label">{escape(board_label(board))}</span>'
-                f'<span class="pm-count">{count}</span></a>'
+                f'<span class="pm-count">{board.n_tasks}</span></a>'
             )
         for board in opens:
+            href = _href("tab=contribute", version)
             parts.append(
-                '<a class="pm-link pm-link--open" target="_self" '
-                f'href="{_href("tab=contribute", private)}">'
+                f'<a class="pm-link pm-link--open" target="_self" href="{href}">'
                 f'<span class="pm-label">{escape(board.name)}</span>'
                 '<span class="pm-badge pm-badge--quiet">open</span></a>'
             )
@@ -211,9 +254,9 @@ def rail_html(
     parts.append('<div class="pm-rail-foot">')
     for tab, label in FOOT_LINKS:
         cls = "pm-foot-link pm-active" if tab == active_tab else "pm-foot-link"
+        href = _href(f"tab={tab}", CURRENT if tab == "submit" else version)
         parts.append(
-            f'<a class="{cls}" target="_self" href="{_href(f"tab={tab}", private)}">'
-            f"{escape(label)}</a>"
+            f'<a class="{cls}" target="_self" href="{href}">{escape(label)}</a>'
         )
     parts.append("</div></div>")
     return "".join(parts)
@@ -249,31 +292,23 @@ def _leading(top) -> str:
 
 
 def _live_card(
-    board: Board, df: pd.DataFrame, by_id: dict[str, dict], private: bool
+    board: Board, df: pd.DataFrame, by_id: dict[str, dict], version: Version
 ) -> str:
-    """A board's card: its numbers and leaders in the current view."""
-    shown = _in_view(board, by_id, private)
-    href = _href(f"board={board.slug}", private)
-    if not shown.task_ids:
-        return (
-            f'<a class="pm-card pm-card--open" target="_self" href="{href}">'
-            f"<h3>{escape(board_label(board))}</h3>"
-            f'<p class="pm-asks">{ALL_PUBLIC}</p></a>'
-        )
-    top = top_models(df, by_id, shown, N_TOP_MODELS)
+    top = top_models(df, by_id, board, N_TOP_MODELS)
+    href = _href(f"board={board.slug}", version)
     return (
         f'<a class="pm-card pm-card--live" target="_self" href="{href}">'
         f"<h3>{escape(board_label(board))}</h3>"
-        f'<p class="pm-meta">{shown.n_tasks} tasks · {shown.n_cohorts} cohorts<br>'
-        f"{shown.n_patients:,} patients · {shown.n_diseases} diseases</p>"
+        f'<p class="pm-meta">{board.n_tasks} tasks · {board.n_cohorts} cohorts<br>'
+        f"{board.n_patients:,} patients · {board.n_diseases} diseases</p>"
         f"{_leading(top)}</a>"
     )
 
 
-def _open_card(board: OpenBoard, private: bool) -> str:
+def _open_card(board: OpenBoard, version: Version) -> str:
     return (
         '<a class="pm-card pm-card--open" target="_self" '
-        f'href="{_href("tab=contribute", private)}">'
+        f'href="{_href("tab=contribute", version)}">'
         f"<h3>{escape(board.name)}</h3>"
         '<p class="pm-meta"><span class="pm-badge pm-badge--quiet">OPEN · no cohort yet</span></p>'
         f'<p class="pm-asks">{escape(board.blurb)}</p>'
@@ -282,16 +317,16 @@ def _open_card(board: OpenBoard, private: bool) -> str:
 
 
 def render_boards(
-    boards: list[Board], df: pd.DataFrame, by_id: dict[str, dict], private: bool
+    boards: list[Board],
+    df: pd.DataFrame,
+    by_id: dict[str, dict],
+    version: Version = CURRENT,
 ) -> str:
     """The Boards overview: every board as a card, grouped by facet.
 
     Live cards link to their board and teaser their leaders; open cards state a
     gap and link to Contribute. A section counts its open slices so the page
     reads as showing its own gaps, not the registry as the whole territory.
-
-    The cards are the full board list in both views, so a board whose tasks are
-    all public stays in place in the private view and says so.
     """
     if not boards:
         return (
@@ -302,9 +337,8 @@ def render_boards(
         '<div class="pm-head"><div><h1>Leaderboards</h1>',
         "<p>PRIMO evaluates zero-shot representations of omics samples through "
         "drug-development-related tasks. Benchmarks are organized by data "
-        "modality, therapeutic area, or task category.</p></div>",
-        _view_switch("tab=boards", private),
-        '</div><div class="pm-body">',
+        "modality, therapeutic area, or task category.</p></div></div>",
+        '<div class="pm-body">',
     ]
     for group in SECTIONS:
         cards, opens = in_group(boards, group), open_in_group(boards, group)
@@ -317,8 +351,8 @@ def render_boards(
             f'<p class="pm-over">{escape(group)}</p>'
             f'<p class="pm-note">{note}{counter}</p></div><div class="pm-grid">'
         )
-        out += [_live_card(b, df, by_id, private) for b in cards]
-        out += [_open_card(b, private) for b in opens]
+        out += [_live_card(b, df, by_id, version) for b in cards]
+        out += [_open_card(b, version) for b in opens]
         out.append("</div></div>")
     out.append("</div>")
     return "".join(out)
@@ -556,9 +590,14 @@ def _board_meta(board: Board) -> str:
 
 
 HVG_TOGGLE = (
-    '<input type="checkbox" id="pm-hvg-toggle" class="pm-hvg-toggle" checked>'
-    '<label class="pm-hvg-switch" for="pm-hvg-toggle">Include models '
+    '<input type="checkbox" id="pm-hvg-toggle" class="pm-check pm-hvg-toggle" '
+    'checked><label class="pm-switch" for="pm-hvg-toggle">Include models '
     '<span class="pm-hvg-chip">+ HVG</span></label>'
+)
+PRIVATE_TOGGLE = (
+    '<input type="checkbox" id="pm-private-toggle" class="pm-check '
+    'pm-private-toggle"><label class="pm-switch" for="pm-private-toggle" '
+    'title="Leave out the tasks whose labels are public">Only private tasks</label>'
 )
 
 
@@ -580,32 +619,59 @@ def _board_tables(
     return ranked, per_task
 
 
-def _hvg_variants(with_hvg: str, plain: str) -> str:
-    """Both renderings of a table; ``HVG_TOGGLE`` shows one, via ``primo.css``."""
-    return (
-        f'<div class="pm-with-hvg">{with_hvg}</div>'
-        f'<div class="pm-without-hvg">{plain}</div>'
-    )
+def _hvg_states(board: Board, df: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
+    """With and without ``+ HVG`` entries if some score on ``board``, else as is."""
+    on_board = df[df["task_id"].map(_norm_id).isin(list(board.task_ids))]
+    if len(without_hvg(on_board)) == len(on_board):
+        return [("", df)]
+    return [("pm-with-hvg", df), ("pm-without-hvg", without_hvg(df))]
+
+
+def _scope_states(board: Board, by_id: dict[str, dict]) -> list[tuple[str, Board]]:
+    """All tasks and the private ones if ``board`` mixes both, else the board."""
+    private = without_public(board, by_id)
+    if private.task_ids in (frozenset(), board.task_ids):
+        return [("", board)]
+    return [("pm-all-tasks", board), ("pm-private-tasks", private)]
+
+
+def _variant(html: str, *classes: str) -> str:
+    """One rendering of a table; the board's checkboxes show one via ``primo.css``."""
+    names = " ".join(name for name in classes if name)
+    return f'<div class="{names}">{html}</div>' if names else html
+
+
+def _head_meta(board: Board, by_id: dict[str, dict]) -> str:
+    """The board's numbers once per scope; ``primo.css`` shows the ticked one."""
+    lines = []
+    for scope, scoped in _scope_states(board, by_id):
+        cls = f' class="{scope}"' if scope else ""
+        lines.append(f"<p{cls}>{_board_meta(scoped)}</p>")
+    return "".join(lines)
 
 
 def _board_body(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
-    """The HVG switch, then the ranked leaderboard and the per-task table.
+    """The switches, then the ranked leaderboard and the per-task table.
 
-    When ``+ HVG`` entries score on the board, both tables are rendered with and without them,
-    so hiding them refits Elo and re-ranks rather than just dropping rows. A
-    CSS-only checkbox, ticked by default, picks which rendering is shown. It must
-    stay a sibling that precedes the groups, as ``primo.css`` selects with ``~``.
+    Both tables are rendered once per switch state, so hiding ``+ HVG`` entries
+    or public tasks refits Elo and re-ranks rather than just dropping rows. The
+    CSS-only checkboxes must stay siblings that precede the groups, as
+    ``primo.css`` selects with ``~``.
     """
-    ranked, per_task = _board_tables(board, df, by_id)
-    on_board = df[df["task_id"].map(_norm_id).isin(list(board.task_ids))]
-    toggle = ""
-    if len(without_hvg(on_board)) < len(on_board):
-        plain_ranked, plain_per_task = _board_tables(board, without_hvg(df), by_id)
-        ranked = _hvg_variants(ranked, plain_ranked)
-        per_task = _hvg_variants(per_task, plain_per_task)
-        toggle = HVG_TOGGLE
+    hvg_states, scopes = _hvg_states(board, df), _scope_states(board, by_id)
+    ranked, per_task = "", ""
+    for scope, scoped in scopes:
+        for hvg, rows in hvg_states:
+            ranked_html, per_task_html = _board_tables(scoped, rows, by_id)
+            ranked += _variant(ranked_html, hvg, scope)
+            per_task += _variant(per_task_html, hvg, scope)
+    toggles = "<br>".join(
+        toggle
+        for toggle, states in ((HVG_TOGGLE, hvg_states), (PRIVATE_TOGGLE, scopes))
+        if len(states) > 1
+    )
     return (
-        f"{toggle}"
+        f"{toggles}"
         '<div class="pm-group"><div class="pm-group-head">'
         '<p class="pm-over pm-over--marine">Ranked</p>'
         '<p class="pm-note">We evaluate zero-shot representations of models, so '
@@ -624,37 +690,26 @@ def _board_body(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
     )
 
 
-def render_board(
-    board: Board | None, df: pd.DataFrame, by_id: dict[str, dict], private: bool
-) -> str:
-    """One board: title strip and view switch, the ranked then per-task tables."""
+def render_board(board: Board | None, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
+    """One board: title strip, the ranked leaderboard, then the per-task table."""
     if board is None:
         return (
             '<div class="pm-head"><div><h1>No board available</h1>'
             "<p>The task registry could not be loaded. Please retry shortly.</p>"
             "</div></div>"
         )
-    shown = _in_view(board, by_id, private)
-    body = (
-        _board_body(shown, df, by_id)
-        if shown.task_ids
-        else f'<p class="pm-caption">{ALL_PUBLIC} Switch to All tasks to see it.</p>'
-    )
     return (
         '<div class="pm-head"><div><p class="pm-over">Board</p>'
         f"<h1>{escape(board_label(board))}</h1>"
-        f"<p>{_board_meta(shown)}</p></div>"
-        f"{_view_switch(f'board={board.slug}', private)}</div>"
-        f'<div class="pm-body">{body}</div>'
+        f"{_head_meta(board, by_id)}</div></div>"
+        f'<div class="pm-body">{_board_body(board, df, by_id)}</div>'
     )
 
 
 # ------------------------------------------------------------------- tasks
-def render_tasks(by_id: dict[str, dict], private: bool) -> str:
+def render_tasks(by_id: dict[str, dict]) -> str:
     """The Tasks page: one scannable row per target. Provenance is never shown."""
-    df = tasks_table(
-        [task for task in by_id.values() if not (private and task.get(PUBLIC))]
-    )
+    df = tasks_table(list(by_id.values()))
     table = _df_to_table(
         df,
         bold_axis=None,
@@ -665,7 +720,6 @@ def render_tasks(by_id: dict[str, dict], private: bool) -> str:
         '<div class="pm-head"><div><h1>Tasks</h1>'
         f"<p>{len(df)} targets. One fixed task probe reads each "
         "one out of your embedding; the cohorts stay anonymous, the biology does "
-        "not.</p></div>"
-        f"{_view_switch('tab=tasks', private)}</div>"
+        "not.</p></div></div>"
         f'<div class="pm-body">{table}</div>'
     )

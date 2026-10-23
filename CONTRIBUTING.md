@@ -89,22 +89,79 @@ Release steps:
 3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`), so code
    taken from `main` never claims to be a release.
 
+### Board versions
+
+The second number is also the version of the leaderboard board: the `v0.2.x`
+releases all score board version `0.2`. A new board version opens when a score can
+change, and a change of the task set counts: a task or a dataset added or retired.
+A new model never opens a version. `space/versions.yaml` lists the board versions
+and the Hub commits that each one reads.
+
+A release that changes scores also opens a board version:
+
+1. In the release PR, add the new version at the top of `space/versions.yaml`,
+   with the commits of the data, the labels and the HVG features it reads, and set
+   `current` to it. When the data changes, build the HVG features from it first,
+   after a `primo download` of every modality:
+
+   ```bash
+   HF_TOKEN=... uv run python scripts/baselines.py --out-dir baselines --publish
+   ```
+
+   It uploads the features and logs the data and reference commits to pin.
+2. After the merge, tag the release as above. Also tag the commits of step 1 `v0.2`
+   on the three Hub dataset repos.
+3. From the tag, score the live entries of the previous version again from their
+   archived files, with the packages of the Space:
+
+   ```bash
+   HF_TOKEN=... uv run --isolated --no-project --python 3.13 \
+     --with-requirements space/requirements.txt \
+     python space/rescore.py --from 0.1 --checkpoint-dir ckpt --publish
+   ```
+
+   The Space still runs version `0.1`, which shows only its own rows. Add
+   `--dry-run` first to list the entries without scoring them. If an entry fails,
+   or gets no score on a task it held, nothing is published: fix it, or rerun with
+   `--models` and the entries to keep.
+4. Deploy the tag (see "Deploy the Space").
+5. Run step 3 again: it adds the submissions made before the deploy.
+
+Step 1 pins the commit of the new data, so the data is on the Hub before the
+release PR. Deploy soon after it: until the deploy, the quickstart and
+`primo download` already read the new data, and the live Space refuses a file with
+a dataset that its version does not list.
+
+### Open version 0.1
+
+Version `0.1` is the first board version. The rows written before versions existed
+carry none, so this version opens once, by hand:
+
+1. In `task_results.csv`, set `version` to `0.1` on every row with a `submitted_at`
+   of `2026-10-19 15:22:47` or later. These rows hold the scores of version `0.1`.
+2. Run `rescore.py --from legacy --publish`, as in step 3 above. It scores again,
+   into version `0.1`, the live entries that step 1 did not tag.
+3. Deploy the release, then repeat step 1 for the rows written before the deploy.
+4. Tag the commits of version `0.1` `v0.1` on the three Hub dataset repos.
+
 ## Deploy the Space
 
-The leaderboard Space runs the `space/` folder of `main`. After a merge that changes
+The leaderboard Space runs the `space/` folder of a release, so the rows of a board
+version all come from the code of that version. After a release that changes
 `space/`, a maintainer with write access to the `PRIMOmics/primo-eval` Space deploys it
 by hand, with their own Hugging Face login (`uv run hf auth login`):
 
 ```bash
-git fetch origin
-tmp=$(mktemp -d) && git archive origin/main space | tar -x -C "$tmp"
+git fetch origin --tags
+tag=v0.2.0
+tmp=$(mktemp -d) && git archive "$tag" space | tar -x -C "$tmp"
 uv run hf upload PRIMOmics/primo-eval "$tmp/space" . --repo-type space \
-  --delete "*" --commit-message "Deploy $(git rev-parse --short origin/main)"
+  --delete "*" --commit-message "Deploy $tag"
 ```
 
-- `git archive` copies `space/` as it is on `main`, without local changes or cache
-  files.
+- `git archive` copies `space/` as it is in the release, without local changes or
+  cache files.
 - `--delete "*"` also deletes the Space files that are no longer in `space/`. The Hub
   always keeps `.gitattributes`.
-- The commit message says which commit of `main` the Space runs.
+- The commit message says which release the Space runs.
 - If your account cannot write to the Space, the Hub refuses the upload.

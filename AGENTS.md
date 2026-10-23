@@ -38,8 +38,12 @@ comes with its `oauth` extra, which the login button of the Space needs.
 - `tests/`: one test file per module.
 - `space/`: the leaderboard Space, as it runs on Hugging Face. `space/README.md` holds
   its config. It still has its own scorer, `space/evaluator.py`. Maintainers deploy
-  it by hand from `main` (see `CONTRIBUTING.md`).
+  a release of it by hand (see `CONTRIBUTING.md`).
+- `space/versions.yaml`: the board versions and the Hub commits each one reads.
+  `space/rescore.py` fills the board of a new version from the archived files.
 - `space_tests/`: the Space tests, one file per Space module.
+- `scripts/baselines.py`: builds the `HVG-1200-genes` baseline from the public data.
+  `--publish` uploads its features as the `+ HVG` reference of a new board version.
 
 ## Rules
 
