@@ -88,6 +88,8 @@ BASELINE_TAG = "(baseline)"
 HVG_TAG = "+ HVG"
 HVG_REFERENCE_MODEL = "HVG-1200-genes"
 HVG_REFERENCE_FILE = f"baselines/{HVG_REFERENCE_MODEL}/submission.parquet"
+ARCHIVE_DIR = "models"
+ARCHIVE_MANIFEST = "manifest.json"
 
 
 def with_baseline_flag(df: pd.DataFrame) -> pd.DataFrame:
@@ -275,6 +277,15 @@ def upload_csv(filename: str, df: pd.DataFrame, token: str | None) -> None:
     )
 
 
+def archive_paths(submission_id: str, source_format: str) -> tuple[str, str]:
+    """Where a submission's file and its manifest are archived in the results repo."""
+    prefix = f"{ARCHIVE_DIR}/{submission_id}"
+    return (
+        f"{prefix}/submission{source_format or '.bin'}",
+        f"{prefix}/{ARCHIVE_MANIFEST}",
+    )
+
+
 def _embedding_manifest(
     path: str | Path,
     model_name: str,
@@ -330,18 +341,14 @@ def archive_submission(
     _, manifest_bytes = _embedding_manifest(
         source, model_name, submission_id, modality, submitted_at, representation
     )
-    prefix = f"models/{submission_id}"
-    archive_suffix = source.suffix.lower() or ".bin"
+    file_path, manifest_path = archive_paths(submission_id, source.suffix.lower())
     HfApi(token=token).create_commit(
         repo_id=RESULTS_REPO,
         repo_type="dataset",
         operations=[
+            CommitOperationAdd(path_in_repo=file_path, path_or_fileobj=source),
             CommitOperationAdd(
-                path_in_repo=f"{prefix}/submission{archive_suffix}",
-                path_or_fileobj=source,
-            ),
-            CommitOperationAdd(
-                path_in_repo=f"{prefix}/manifest.json", path_or_fileobj=manifest_bytes
+                path_in_repo=manifest_path, path_or_fileobj=manifest_bytes
             ),
         ],
         commit_message=f"Archive embedding submission {submission_id}",
