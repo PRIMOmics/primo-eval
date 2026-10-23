@@ -123,6 +123,7 @@ def test_table_sort_prefers_the_numeric_cell_value_over_sd_display_text():
 def test_owned_model_name_does_not_reveal_owner(monkeypatch):
     monkeypatch.setattr(app, "_results_frame", lambda: _ledger())
     monkeypatch.setattr(app, "_claimed_by", lambda df, model: "private-owner")
+    monkeypatch.setattr(app, "_rendered_board", lambda *args: "board")
 
     summary, _ = app.evaluate(
         "submission.csv",

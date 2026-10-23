@@ -52,10 +52,10 @@ It shows whether a model adds information that expression alone does not carry.
 These rows are shown by default; untick **Include models + HVG** on a board to
 hide them, which re-ranks the board and refits Elo without them.
 
-A board covering more than one family also shows a **Mean** of the family
-columns. It is there to give the table an order, but it does average AUROC,
-Pearson and centered Spearman, so use it as a tie-break and do the real
-comparison on the family columns.
+Every board also shows a **Mean score**: the average of the model's scores on
+the tasks of the board. Elo orders the rows, not this mean. When a board holds
+more than one metric, this mean mixes them, so do the real comparison on the
+family columns.
 
 ## How the results are organised
 

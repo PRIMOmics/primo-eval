@@ -7,7 +7,7 @@
   four lines, fake numbers, the exact shape we expect.
 
 ```bash
-pip install anndata scikit-learn pandas pyyaml huggingface_hub
+pip install anndata scikit-learn pandas pyarrow pyyaml huggingface_hub
 python quickstart.py --modality bulk-rna --out submission.parquet
 # or: --modality single-cell-rna
 ```

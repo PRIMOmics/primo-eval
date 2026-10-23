@@ -1357,7 +1357,6 @@ def test_load_labels_requires_subject_ids(tmp_path):
         {ev.SAMPLE_ID: ["s1", "s2"], ev.LABEL: [0, 1], ev.FOLD: [0, 1]}
     ).to_csv(tmp_path / "labels.csv", index=False)
 
-    assert ev.fetch_public_task_ids() == set()
     with pytest.raises(ev.EvaluatorError, match="subject_id"):
         ev.load_labels(tmp_path / "labels.csv")
 

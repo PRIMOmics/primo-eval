@@ -113,10 +113,10 @@ metric. Two families are never merged into one column:
   Spearman**), where 1 is perfect, 0 is uninformative, and -1 is an inverse gene
   ranking.
 
-A leaderboard shows one column per family. A board holding more than one family
-also shows **Mean**, the average of those columns. It is what orders the rows,
-but it does mix AUROC, Pearson and centered Spearman, so treat it as a tie-break and
-compare models on the family columns.
+A leaderboard shows one column per family. It also shows **Mean score**, the
+average of the model's scores on the tasks of the board. Elo orders the rows,
+not this mean. When a board holds more than one metric, this mean mixes them,
+so compare models on the family columns.
 
 ## Boards
 
@@ -151,7 +151,7 @@ function for your encoder and nothing else changes. `example_submission.csv`
 shows the expected shape in four lines.
 
 ```bash
-pip install anndata scikit-learn pandas pyyaml huggingface_hub
+pip install anndata scikit-learn pandas pyarrow pyyaml huggingface_hub
 python quickstart.py --modality bulk-rna --out submission.parquet
 ```
 

@@ -209,6 +209,20 @@ def test_ranked_table_bolds_the_lowest_mean_rank():
     assert (0, "Mean score") in bold
 
 
+def test_ranked_table_does_not_bold_the_largest_submissions_count():
+    df = pd.DataFrame(
+        {
+            "Elo": [1200, 1000],
+            "Submissions count": pd.array([1, 7], dtype="Int64"),
+        }
+    )
+
+    bold = render._bold_cells(df, render._score_columns(df), axis=0)
+
+    assert (0, "Elo") in bold
+    assert (1, "Submissions count") not in bold
+
+
 def test_data_tables_expose_sortable_column_headers(boards, registry, named, results):
     df = results(*[("eva", task_id, 0.8, "2026-01-01") for task_id in registry])
     html = render_board(named("bulk RNA"), df, registry)
