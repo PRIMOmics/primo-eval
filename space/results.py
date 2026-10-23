@@ -210,16 +210,20 @@ def fetch_hvg_reference(token: str | None, revision: str = CURRENT.reference) ->
     )
 
 
-def upload_hvg_reference(path: str | Path, token: str | None) -> None:
-    """Replace the HVG-1200 features with the ones just published as baseline."""
+def upload_hvg_reference(path: str | Path, token: str | None) -> str:
+    """Replace the HVG-1200 features; return the commit that holds them, to pin."""
     from huggingface_hub import HfApi
 
-    HfApi(token=token).upload_file(
-        path_or_fileobj=str(path),
-        path_in_repo=HVG_REFERENCE_FILE,
-        repo_id=RESULTS_REPO,
-        repo_type="dataset",
-        commit_message="Update HVG-1200 reference features",
+    return (
+        HfApi(token=token)
+        .upload_file(
+            path_or_fileobj=str(path),
+            path_in_repo=HVG_REFERENCE_FILE,
+            repo_id=RESULTS_REPO,
+            repo_type="dataset",
+            commit_message="Update HVG-1200 reference features",
+        )
+        .oid
     )
 
 

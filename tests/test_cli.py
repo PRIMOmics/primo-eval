@@ -9,7 +9,7 @@ import yaml
 from conftest import PUBLIC_TASKS, signal_blocks, write_submission
 
 from primomics import cli, data
-from primomics.evaluate import score_all
+from primomics.evaluate import GENE_SPACE, score_all
 
 
 @pytest.fixture(autouse=True)
@@ -176,6 +176,28 @@ def test_evaluate_matches_score_all_on_the_same_files(
     _evaluate(submission, local_data, "-o", str(output))
 
     report = json.loads(output.read_text())
+    assert report["per_task"][0]["score"] == expected["per_task"][0].score
+
+
+def test_evaluate_scores_gene_space_files_as_they_are(
+    public_tasks, local_data, tmp_path
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    output = tmp_path / "results.json"
+    fetch_labels, _ = data.local_fetchers(local_data)
+    expected = score_all(
+        submission,
+        datasets=data.local_manifest(local_data),
+        tasks=[PUBLIC_TASKS[0]],
+        fetch_labels=fetch_labels,
+        modality="bulk-rna",
+        representation=GENE_SPACE,
+    )
+
+    _evaluate(submission, local_data, "--representation", GENE_SPACE, "-o", str(output))
+
+    report = json.loads(output.read_text())
+    assert report["representation"] == GENE_SPACE
     assert report["per_task"][0]["score"] == expected["per_task"][0].score
 
 

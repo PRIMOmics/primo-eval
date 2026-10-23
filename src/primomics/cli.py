@@ -36,7 +36,14 @@ from primomics.data import (
     locked_files,
 )
 from primomics.errors import EvaluatorError, SubmissionError
-from primomics.evaluate import MODALITIES, TASK_ID, manifest_ids, score_all
+from primomics.evaluate import (
+    EMBEDDING,
+    MODALITIES,
+    REPRESENTATIONS,
+    TASK_ID,
+    manifest_ids,
+    score_all,
+)
 from primomics.submission import DATASET_ID, norm_id
 from primomics.submit import PUBLISHED, REFUSED, SPACE, submit
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
@@ -180,6 +187,7 @@ def _report(
     return {
         "primomics_version": __version__,
         "modality": args.modality,
+        "representation": args.representation,
         "submission": {
             "file": Path(args.submission).name,
             "sha256": _sha256(args.submission),
@@ -241,6 +249,7 @@ def _evaluate(args: argparse.Namespace) -> None:
         fetch_labels=fetch_labels,
         fetch_targets=fetch_targets,
         modality=args.modality,
+        representation=args.representation,
     )
     _log_scores(result, verdicts, scored)
     if args.output:
@@ -334,6 +343,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     score.add_argument("submission", help="a .parquet, .csv, .tsv or .npz file")
     score.add_argument("--modality", required=True, choices=sorted(MODALITIES))
+    score.add_argument(
+        "--representation",
+        choices=REPRESENTATIONS,
+        default=EMBEDDING,
+        help=(
+            "embedding (default, as for every submission) puts each row on the "
+            "unit sphere; gene_space keeps the rows as they are, as for the "
+            "HVG-1200-genes baseline"
+        ),
+    )
     _add_data_dir(score, "read")
     score.add_argument("-o", "--output", help="write the results to this JSON file")
     score.set_defaults(run=_evaluate)

@@ -229,6 +229,24 @@ click **Evaluate**: after a few minutes, your scores show on the boards.
 The Submit tab also gives the rules: partial submissions, new submissions under the
 same name, and the `+ HVG` entry that comes with each submission.
 
+## 📏 Reproduce the baseline
+
+The `HVG-1200-genes` entry of the leaderboard is a linear baseline. Its embedding
+is the expression itself: log2(CPM+1) for bulk samples, and the mean of the
+per-cell log2(CP10K+1) profiles for single-cell samples, on the 1,200 genes with
+the highest variance in each dataset. From the clone, after step 3:
+
+```bash
+uv run python scripts/baselines.py --modality bulk-rna --out-dir baselines
+uv run primo evaluate baselines/submission_HVG-1200-genes.parquet \
+  --modality bulk-rna --representation gene_space
+```
+
+`--representation gene_space` scores the genes as they are, as the leaderboard does
+for this baseline, instead of putting each embedding on the unit sphere. If you
+downloaded only some datasets, pass the same `--datasets` list to
+`scripts/baselines.py`.
+
 ## 🛠️ Development
 
 In the clone (step 2), run the same checks as the CI:
