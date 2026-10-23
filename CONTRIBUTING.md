@@ -82,12 +82,13 @@ For stable scores, install a released version, not `main`.
 
 Release steps:
 
-1. Run `uv version 0.2.0`: the version goes from `0.2.0.dev0` to `0.2.0` in
-   `pyproject.toml` and `uv.lock`. Then open a PR.
+1. Run `uv version 0.2.0`: it sets the version to `0.2.0` in `pyproject.toml` and
+   `uv.lock`. Then open a PR.
 2. After the merge, tag the merge commit `v0.2.0` and create a GitHub Release. Its
    notes start with "Scores change" or "Scores do not change".
-3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`), so code
-   taken from `main` never claims to be a release.
+3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`).
+   `primo evaluate` writes this version into `results.json`, so a result made from
+   `main` never carries the number of a release.
 
 ### Board versions
 
