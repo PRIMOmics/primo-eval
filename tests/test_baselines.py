@@ -11,10 +11,9 @@ import pandas as pd
 import pytest
 import yaml
 from baselines import (
-    CONFIGS,
     DATASET_ID,
-    EMBEDDING,
     GENE_SPACE,
+    HVG_1200,
     SAMPLE_ID,
     BaselineConfig,
     build_submission,
@@ -127,20 +126,14 @@ def test_a_sample_without_counts_stays_at_zero():
     np.testing.assert_array_equal(emb[0], [0.0, 0.0])
 
 
-def test_hvg1200_is_the_only_published_baseline():
-    assert set(CONFIGS) == {"HVG-1200-genes"}
-
-
 def test_the_elo_anchor_names_a_published_baseline():
     """The Elo scale is pinned to a baseline that this script has to keep publishing.
 
-    ``space/`` is a flat tree deployed as-is and cannot import this script, so the
-    name is spelled in both; stop spelling it here and every rating silently
-    falls back to a mean-centred scale.
+    If the names differ, every rating silently falls back to a mean-centred scale.
     """
     from leaderboard import ELO_ANCHOR_MODEL
 
-    assert ELO_ANCHOR_MODEL in CONFIGS
+    assert ELO_ANCHOR_MODEL == HVG_1200.name
 
 
 def test_embed_hvg_keeps_the_top_variance_genes():
@@ -156,49 +149,6 @@ def test_tied_genes_at_the_cut_keep_the_higher_column():
     assert baselines.top_variance_genes(x, 2).tolist() == [1, 2]
 
 
-def test_embed_pca_reduces_dim():
-    rng = np.random.default_rng(0)
-    x = rng.poisson(5, size=(30, 40)).astype(float)
-    emb = embed(_adata(x), BaselineConfig("pca-10", n_pca=10))
-    assert emb.shape == (30, 10)
-
-
-def test_embed_pca_caps_at_n_samples_minus_one():
-    rng = np.random.default_rng(0)
-    x = rng.poisson(5, size=(8, 40)).astype(float)
-    emb = embed(_adata(x), BaselineConfig("pca-50", n_pca=50))
-    assert emb.shape == (8, 7)
-
-
-def test_embed_hvg_then_pca():
-    rng = np.random.default_rng(0)
-    x = rng.poisson(5, size=(30, 100)).astype(float)
-    emb = embed(_adata(x), BaselineConfig("hvg20-pca5", n_hvg=20, n_pca=5))
-    assert emb.shape == (30, 5)
-
-
-def test_random_embedding_ignores_the_expression():
-    """The zero anchor must not read the counts, or it is not an anchor."""
-    config = BaselineConfig("random-8", n_random=8)
-    emb = embed(_adata(np.ones((12, 40))), config)
-    other = embed(_adata(np.full((12, 40), 999.0)), config)
-    assert emb.shape == (12, 8)
-    np.testing.assert_array_equal(emb, other)
-
-
-def test_random_cannot_be_mixed_with_a_real_recipe():
-    with pytest.raises(ValueError, match="n_random"):
-        BaselineConfig("bad", n_pca=10, n_random=8)
-
-
-def test_gene_recipes_keep_their_scale_and_projections_do_not():
-    """A PCA axis has no more unit than a learned dimension; a gene column does."""
-    assert BaselineConfig("hvg", n_hvg=1200).representation == GENE_SPACE
-    assert BaselineConfig("raw").representation == GENE_SPACE
-    assert BaselineConfig("pca", n_pca=64).representation == EMBEDDING
-    assert BaselineConfig("noise", n_random=32).representation == EMBEDDING
-
-
 def test_build_submission_has_ids_and_matches_samples(tmp_path):
     rng = np.random.default_rng(0)
     _write_data(
@@ -208,7 +158,7 @@ def test_build_submission_has_ids_and_matches_samples(tmp_path):
             "d902": _adata(rng.poisson(5, size=(5, 4)).astype(float)),
         },
     )
-    submission = build_submission(tmp_path, BaselineConfig("pca-3", n_pca=3))
+    submission = build_submission(tmp_path, BaselineConfig("hvg-3", n_hvg=3))
     assert list(submission.columns[:2]) == [DATASET_ID, SAMPLE_ID]
     assert len(submission) == 11
     d901 = submission[submission[DATASET_ID] == "d901"]
@@ -456,6 +406,36 @@ def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
 
     assert uploads == [tmp_path / "out" / "submission_HVG-1200-genes.parquet"]
     assert "data data123, reference ref456" in caplog.text
+
+
+def test_score_writes_the_scores_of_the_baseline(tmp_path, monkeypatch):
+    _write_data(tmp_path / "data", {"d901": _adata(np.ones((4, 3)))})
+    calls = []
+    monkeypatch.setattr(
+        baselines,
+        "score_submission",
+        lambda path, data_dir, **kwargs: (
+            calls.append(kwargs)
+            or {"coverage": 1.0, "categories": {"c901": {"mean": 0.75}}}
+        ),
+    )
+
+    _main(
+        monkeypatch,
+        "--data-dir",
+        str(tmp_path / "data"),
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--score",
+        "--labels-dir",
+        str(tmp_path / "labels"),
+    )
+
+    assert [call["representation"] for call in calls] == [GENE_SPACE]
+    scores = pd.read_csv(tmp_path / "out" / "baselines_scores.csv")
+    assert scores.to_dict("records") == [
+        {"config": "HVG-1200-genes", "coverage": 1.0, "c901": 0.75}
+    ]
 
 
 def test_a_folder_without_a_download_is_refused(tmp_path):

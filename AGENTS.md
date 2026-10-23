@@ -42,9 +42,8 @@ comes with its `oauth` extra, which the login button of the Space needs.
 - `space/versions.yaml`: the board versions and the Hub commits each one reads.
   `space/rescore.py` fills the board of a new version from the archived files.
 - `space_tests/`: the Space tests, one file per Space module.
-- `scripts/baselines.py`: builds the linear baselines, such as `HVG-1200-genes`,
-  from the public data. `--publish` uploads the HVG-1200 features as the `+ HVG`
-  reference of a new board version.
+- `scripts/baselines.py`: builds the `HVG-1200-genes` baseline from the public data.
+  `--publish` uploads its features as the `+ HVG` reference of a new board version.
 
 ## Rules
 

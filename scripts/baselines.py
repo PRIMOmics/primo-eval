@@ -1,13 +1,13 @@
-"""Linear-baseline submissions for the PRIMO leaderboard, such as HVG-1200-genes.
+"""The HVG-1200-genes baseline submission for the PRIMO leaderboard.
 
 The benchmark scores SUBMITTED EMBEDDINGS: a submitter sends one vector per
 sample and the evaluator fits its fixed task probe (linear for scalar targets,
 multi-output ridge for perturbation responses) on them. So a "linear baseline" is
 not new model code: it is a choice of EMBEDDING. Here the embedding is the
-expression itself, reduced to a few features:
+expression itself, reduced to its 1,200 highest-variance genes (HVG):
 
-    bulk: raw counts -> log2(CPM+1) -> [top-variance genes] -> [PCA]
-    single-cell: raw counts -> per-cell log2(CP10K+1) -> sample mean -> [HVG/PCA]
+    bulk: raw counts -> log2(CPM+1) -> HVG
+    single-cell: raw counts -> per-cell log2(CP10K+1) -> sample mean -> HVG
 
 with no gene scaling. Feature extraction is unsupervised (label-blind) and fit
 once on each dataset's FULL expression, including the held-out folds. Only the
@@ -15,12 +15,8 @@ probe is fit per fold, in ``space/evaluator.py``, so the selection is
 transductive: a pipeline picking its genes inside each training fold would see
 strictly less.
 
-``n_random`` is the other end of the scale: an embedding drawn from noise, which
-ignores the expression entirely. Publishing one anchors the zero of a board.
-None is in ``SWEEP`` today.
-
-One config -> one submission file, built from the data that ``primo download``
-writes. Anyone can then score its public tasks with ``primo evaluate``:
+The submission file is built from the data that ``primo download`` writes.
+Anyone can then score its public tasks with ``primo evaluate``:
 
     uv run python scripts/baselines.py --data-dir primo-data --modality bulk-rna \\
         --out-dir baselines
@@ -51,7 +47,6 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
 
 SPACE_DIR = Path(__file__).resolve().parents[1] / "space"
 if str(SPACE_DIR) not in sys.path:
@@ -59,13 +54,11 @@ if str(SPACE_DIR) not in sys.path:
 
 from evaluator import (
     DATASET_ID,
-    EMBEDDING,
     GENE_SPACE,
     LABELS_FILENAME,
     MANIFEST_FILENAME,
     MODALITIES,
     PUBLIC_REPO,
-    RANDOM_STATE,
     SAMPLE_ID,
     TARGETS_FILENAME,
     TASKS_FILENAME,
@@ -89,34 +82,16 @@ SCORES_FILENAME = "baselines_scores.csv"
 
 @dataclass(frozen=True)
 class BaselineConfig:
-    """One linear baseline: optional top-variance gene selection, then optional PCA.
+    """One linear baseline: the ``n_hvg`` top-variance genes, or every gene if None.
 
-    ``n_hvg`` / ``n_pca`` are upper bounds: both are capped per dataset to what
-    its sample and gene counts allow. ``n_random`` replaces the recipe altogether
-    with noise of that width, so it cannot be combined with the other two.
+    ``n_hvg`` is an upper bound: a dataset with fewer genes keeps them all.
     """
 
     name: str
     n_hvg: int | None = None
-    n_pca: int | None = None
-    n_random: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.n_random is not None and (self.n_hvg or self.n_pca):
-            raise ValueError(
-                f"Baseline '{self.name}': n_random ignores the expression, so it "
-                f"cannot be combined with n_hvg/n_pca."
-            )
-
-    @property
-    def representation(self) -> str:
-        """Gene selection keeps its log2(CPM+1) scale; a projection has no unit."""
-        projected = self.n_pca is not None or self.n_random is not None
-        return EMBEDDING if projected else GENE_SPACE
 
 
-SWEEP: tuple[BaselineConfig, ...] = (BaselineConfig("HVG-1200-genes", n_hvg=1200),)
-CONFIGS: dict[str, BaselineConfig] = {config.name: config for config in SWEEP}
+HVG_1200 = BaselineConfig(HVG_REFERENCE_MODEL, n_hvg=1200)
 
 
 def log_normalize(x: np.ndarray, target_sum: float) -> np.ndarray:
@@ -160,17 +135,9 @@ def _sample_expression(adata: ad.AnnData) -> tuple[np.ndarray, np.ndarray]:
 
 def embed(adata: ad.AnnData, config: BaselineConfig) -> np.ndarray:
     """Embed sample profiles, mean-pooling per-cell CP10K profiles when needed."""
-    if config.n_random is not None:
-        rng = np.random.default_rng(RANDOM_STATE)
-        return rng.standard_normal(
-            (len(prediction_ids(adata)), config.n_random), dtype=np.float32
-        )
     _, x = _sample_expression(adata)
     if config.n_hvg is not None:
         x = x[:, top_variance_genes(x, config.n_hvg)]
-    if config.n_pca is not None:
-        k = min(config.n_pca, x.shape[0] - 1, x.shape[1])
-        x = PCA(n_components=k, random_state=RANDOM_STATE).fit_transform(x)
     return np.asarray(x, dtype=np.float32)
 
 
@@ -323,22 +290,15 @@ def check_data_is_current(data_dir: Path) -> str:
     return commit
 
 
-def publish_reference(config: BaselineConfig, path: Path, token: str | None) -> str:
+def publish_reference(path: Path, token: str | None) -> str:
     """Upload the features every submission is concatenated with (``+ HVG``).
 
     Returns the commit of the results repo that holds them, for a new board
     version to pin. The version rescore then scores the baseline from them.
     """
-    if config.name != HVG_REFERENCE_MODEL:
-        raise ValueError(
-            f"only {HVG_REFERENCE_MODEL} is the + HVG reference, not {config.name}"
-        )
     commit = upload_hvg_reference(path, token)
-    logger.info("Uploaded the %s features as the + HVG reference.", config.name)
+    logger.info("Uploaded the %s features as the + HVG reference.", HVG_REFERENCE_MODEL)
     return commit
-
-
-_META_COLS = ("config", "coverage")
 
 
 def _score_row(config: BaselineConfig, result: dict) -> dict:
@@ -347,19 +307,6 @@ def _score_row(config: BaselineConfig, result: dict) -> dict:
     for category, stats in result["categories"].items():
         row[category] = stats["mean"]
     return row
-
-
-def _log_scores(rows: list[dict]) -> None:
-    """Log the sweep, ordered by the hidden mean of the category scores.
-
-    The ranking key (mean across categories) is used to sort but not shown, to
-    match the leaderboard.
-    """
-    categories = sorted({k for row in rows for k in row if k not in _META_COLS})
-    frame = pd.DataFrame(rows)
-    frame["_rank"] = frame[categories].mean(axis=1)
-    frame = frame.sort_values("_rank", ascending=False).drop(columns="_rank")
-    logger.info("\n%s", frame.round(4).to_string(index=False))
 
 
 def _dataset_ids(value: str) -> list[str]:
@@ -371,7 +318,7 @@ def main() -> None:
     """CLI entry point."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(
-        description="Build (and optionally score and publish) PRIMO linear baselines."
+        description="Build (and optionally score and publish) the HVG-1200 baseline."
     )
     parser.add_argument(
         "--data-dir",
@@ -380,7 +327,7 @@ def main() -> None:
         help="The public data, as primo download writes it.",
     )
     parser.add_argument(
-        "--out-dir", type=Path, required=True, help="Where to write submissions."
+        "--out-dir", type=Path, required=True, help="Where to write the submission."
     )
     parser.add_argument(
         "--modality",
@@ -393,15 +340,9 @@ def main() -> None:
         help="Embed only these comma-separated datasets, for a partial download.",
     )
     parser.add_argument(
-        "--config",
-        nargs="+",
-        choices=sorted(CONFIGS),
-        help="Run these configs; omit to run the full sweep.",
-    )
-    parser.add_argument(
         "--score",
         action="store_true",
-        help="Score each submission on every task (needs the private labels).",
+        help="Score the submission on every task (needs the private labels).",
     )
     parser.add_argument(
         "--labels-dir",
@@ -415,7 +356,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configs = [CONFIGS[name] for name in args.config] if args.config else list(SWEEP)
     token = os.environ.get("HF_TOKEN")
     if args.publish and not token:
         raise SystemExit("--publish needs write access: set HF_TOKEN.")
@@ -424,44 +364,34 @@ def main() -> None:
             "--publish needs every dataset of every modality: drop --modality and "
             "--datasets."
         )
-    if args.publish and HVG_REFERENCE_MODEL not in {config.name for config in configs}:
-        raise SystemExit(
-            f"--publish uploads the {HVG_REFERENCE_MODEL} features: add it to --config."
-        )
     if args.score and args.labels_dir is None and not token:
         raise SystemExit("--score reads the labels on the Hub: set HF_TOKEN.")
     data_commit = check_data_is_current(args.data_dir) if args.publish else None
 
-    rows = []
-    for config in configs:
-        submission = build_submission(
-            args.data_dir, config, args.modality, args.datasets
+    submission = build_submission(args.data_dir, HVG_1200, args.modality, args.datasets)
+    path = write_submission(submission, args.out_dir, HVG_1200)
+    if args.score:
+        result = score_submission(
+            path,
+            args.data_dir,
+            representation=GENE_SPACE,
+            labels_dir=args.labels_dir,
+            modality=args.modality,
+            token=token,
         )
-        path = write_submission(submission, args.out_dir, config)
-        if args.score:
-            result = score_submission(
-                path,
-                args.data_dir,
-                representation=config.representation,
-                labels_dir=args.labels_dir,
-                modality=args.modality,
-                token=token,
-            )
-            rows.append(_score_row(config, result))
-        if args.publish and config.name == HVG_REFERENCE_MODEL:
-            reference_commit = publish_reference(config, path, token)
-            logger.info(
-                "Pin these commits in space/versions.yaml for the new board version: "
-                "data %s, reference %s.",
-                data_commit,
-                reference_commit,
-            )
-
-    if rows:
-        _log_scores(rows)
+        scores = pd.DataFrame([_score_row(HVG_1200, result)])
+        logger.info("\n%s", scores.round(4).to_string(index=False))
         scores_path = args.out_dir / SCORES_FILENAME
-        pd.DataFrame(rows).to_csv(scores_path, index=False)
+        scores.to_csv(scores_path, index=False)
         logger.info("Wrote %s.", scores_path)
+    if args.publish:
+        reference_commit = publish_reference(path, token)
+        logger.info(
+            "Pin these commits in space/versions.yaml for the new board version: "
+            "data %s, reference %s.",
+            data_commit,
+            reference_commit,
+        )
 
 
 if __name__ == "__main__":
