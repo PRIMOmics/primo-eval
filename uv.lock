@@ -641,7 +641,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pyyaml" },
-    { name = "scikit-learn", specifier = ">=1.7,<1.10" },
+    { name = "scikit-learn", specifier = ">=1.9,<1.10" },
     { name = "scipy" },
 ]
 

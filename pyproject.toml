@@ -15,7 +15,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "pyyaml",
-    "scikit-learn>=1.7,<1.10",
+    "scikit-learn>=1.9,<1.10",
     "scipy",
 ]
 
