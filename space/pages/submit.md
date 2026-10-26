@@ -1,4 +1,6 @@
-**The fastest way in.** Two files, both in this [Space's repo](https://huggingface.co/spaces/PRIMOmics/primo-eval/blob/main/quickstart.py):
+### The fastest way in
+
+Two files, both in this [Space's repo](https://huggingface.co/spaces/PRIMOmics/primo-eval/blob/main/quickstart.py):
 
 - 📥 [`quickstart.py`](https://huggingface.co/spaces/PRIMOmics/primo-eval/blob/main/quickstart.py):
   downloads the selected modality, embeds it, and writes a valid submission.
@@ -12,16 +14,14 @@ python quickstart.py --modality bulk-rna --out submission.parquet
 # or: --modality single-cell-rna
 ```
 
----
-
-Or do it by hand, in **three steps**:
+### Or by hand, in three steps
 
 1. **Choose one modality** → use the selector in the form. The quickstart
    downloads only its datasets from [PRIMOmics/primo](https://huggingface.co/datasets/PRIMOmics/primo).
 2. **Embed that modality** → build **one** file: `dataset_id`, `sample_id`, then one column per embedding dim (`e0`, `e1`, …). CSV / TSV / Parquet, or NPZ.
 3. **Sign in, fill the form, and hit Evaluate.** Add an institution for group submissions, check **Submitted by the model's authors** when applicable, and provide a paper link to make the model name clickable. A fixed task probe scores each hidden task (AUROC, Pearson or centered Spearman), reported per task category in its native metric.
 
-**Example file**
+### Example file
 
 ```
 dataset_id,sample_id,e0,e1,e2
@@ -33,6 +33,8 @@ For bulk datasets, each H5AD row is one submission sample. For single-cell
 datasets, H5AD rows are cells and `obs["sample_id"]` maps them to opaque
 collection samples. Aggregate the cells however your model requires and submit
 exactly one embedding per unique `sample_id`; the submission schema is unchanged.
+
+### Good to know
 
 Files containing dataset IDs from another modality are rejected. **Partial
 submissions are welcome, and they add up.** Cover fewer datasets and you are still

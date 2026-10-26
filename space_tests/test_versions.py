@@ -43,6 +43,17 @@ def test_each_release_tag_belongs_to_its_version():
         assert version.release.startswith(f"v{version.number}.")
 
 
+def test_every_version_says_what_changed():
+    for version in VERSIONS:
+        assert version.notes.strip()
+
+
+def test_a_version_without_notes_still_loads(tmp_path):
+    current, _ = load_versions(_write(tmp_path, '"0.1"', _entry("0.1")))
+
+    assert current.notes == ""
+
+
 def test_the_current_version_is_the_minor_version_of_the_package():
     package = tomllib.loads(PYPROJECT.read_text())["project"]["version"]
     assert CURRENT.number == ".".join(package.split(".")[:2])

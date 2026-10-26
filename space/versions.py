@@ -7,7 +7,8 @@ push to one of these repos changes no score until a release opens a new version.
 ``versions.yaml`` lists every version. ``current`` is the version this code scores
 and shows by default. Each version names its release tag, the day it opened, and
 three commits: ``data`` of the public data repo, ``labels`` of the private labels
-repo, and ``reference`` of the results repo, which holds the HVG features.
+repo, and ``reference`` of the results repo, which holds the HVG features. Its
+``notes`` say in one line what changed: the board shows them to every visitor.
 """
 
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ VERSIONS_FILE = Path(__file__).parent / "versions.yaml"
 
 @dataclass(frozen=True)
 class Version:
-    """One board version and the Hub commits its scores read."""
+    """One board version, the Hub commits its scores read, and what changed."""
 
     number: str
     release: str
@@ -28,6 +29,7 @@ class Version:
     data: str
     labels: str
     reference: str
+    notes: str = ""
 
 
 def _quoted(entry: dict, path: Path) -> dict:

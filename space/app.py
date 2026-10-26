@@ -1,11 +1,12 @@
 """Gradio front-end for the PRIMO public benchmark.
 
-A left rail navigates six pages: Boards (a grid of every board), Board (one
-leaderboard at a time), Tasks ("what is actually being tested?"), Submit ("how
-do I enter?"), Contribute ("what is missing, and how do I add it?"), Method
-("can I trust this?"). Every page is addressable -- ``?board=<slug>`` opens a
-board and ``?tab=contribute`` opens a tab -- which is what the rail links and the
-open cards use. The tab strip is hidden in CSS; the rail is the navigation.
+A top bar navigates five pages: Leaderboard (one ranking, chosen with the
+Modality, Therapeutic area and Task pills), Tasks ("what is actually being
+tested?"), Submit ("how do I enter?"), Contribute ("what is missing, and how do
+I add it?"), Method ("can I trust this?"). Every page is addressable --
+``?tab=contribute`` opens a tab and ``?modality=bulk-rna&area=oncology&task=all``
+a view; old ``?board=<slug>`` links still open their view. The tab strip is
+hidden in CSS; the top bar is the navigation.
 ``&version=<number>`` shows a closed board version, read-only: its registry at
 its pinned commits and the rows it scored. Submit always shows the current one.
 
@@ -14,8 +15,8 @@ Choose one modality and upload its embedding file (rows keyed by ``dataset_id``
 several hidden targets). Results roll up into boards -- the whole modality, one
 therapeutic area, one task family -- and each board ranks the models that
 covered every task our baseline scored, one column per category in its native
-metric (AUROC, Pearson, or centered Spearman), plus a ``Mean`` of those columns
-that orders the rows and is labelled as the cross-metric average it is.
+metric (AUROC, Pearson, or centered Spearman). The rows are ordered by Elo; no
+column averages across metrics.
 
 Disclosure policy -- what the public pages may show:
   per task   disease, tissue, area, modality, what is predicted, class names, n, metric
@@ -36,8 +37,8 @@ the traceback rather than blaming the submission.
 
 A page load is ONE fetch: ``_init`` pulls the registry, the boards and the
 persisted results once and threads that state into every page, rather than each
-page fetching for itself. It renders in two steps: every page but Boards first,
-then Boards, which fits an Elo per board and would otherwise delay every page.
+page fetching for itself. The state stays in the session, so a click on a pill
+re-renders the view from it, with no reload and no new fetch.
 """
 
 import os
@@ -48,7 +49,18 @@ from uuid import uuid4
 
 import gradio as gr
 import pandas as pd
-from boards import PUBLIC, Board, build_boards, by_slug
+from boards import (
+    ALL,
+    PUBLIC,
+    Board,
+    area_choices,
+    board_view,
+    build_boards,
+    category_choices,
+    modality_choices,
+    view_board,
+    without_public,
+)
 from evaluator import (
     EMBEDDING,
     EvaluatorError,
@@ -63,13 +75,17 @@ from evaluator import (
 )
 from leaderboard import RESERVED_COLUMNS, source_repositories
 from render import (
+    BOARD_SUB,
+    CREDIT,
     VERSION_PARAM,
+    cta_html,
     evaluation_confirmation,
     evaluation_status,
-    rail_html,
-    render_board,
-    render_boards,
+    hero_html,
+    history_html,
+    nav_html,
     render_tasks,
+    render_view,
 )
 from results import (
     BASELINE_TAG,
@@ -95,7 +111,7 @@ from versions import CURRENT, VERSIONS, Version
 HERE = Path(__file__).parent
 PAGES_DIR = HERE / "pages"
 CSS_PATH = str(HERE / "primo.css")
-ALLOWED_PATHS = [str(HERE / "assets"), str(HERE / "fonts")]
+ALLOWED_PATHS = [str(HERE / "assets")]
 SOCIAL_PREVIEW_URL = (
     "https://huggingface.co/spaces/PRIMOmics/primo-eval/resolve/main/"
     "assets/primo-social-preview.png"
@@ -108,21 +124,54 @@ PAGE_HEAD = f"""
 <meta name="twitter:title" content="PRIMO Benchmark" />
 <meta name="twitter:description" content="A blind benchmark for omics foundation models." />
 <meta name="twitter:image" content="{SOCIAL_PREVIEW_URL}" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Outfit:wght@300..800&display=swap">
 """
 
 TOKEN = os.environ.get("HF_TOKEN")
-TAB_IDS = ("boards", "board", "tasks", "submit", "contribute", "method")
-FOOT_TABS = frozenset({"tasks", "submit", "contribute", "method"})
+TAB_IDS = ("leaderboard", "tasks", "submit", "contribute", "method")
+LEGACY_TABS = {"boards": "leaderboard", "board": "leaderboard"}
+DEFAULT_MODALITY = "bulk-rna"
+SHOW = "show"
+HIDE = "hide"
+TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
 
 THEME = gr.themes.Base(
-    font=["Funnel Sans", "sans-serif"], font_mono=["DM Mono", "monospace"]
+    font=["Outfit", "sans-serif"], font_mono=["IBM Plex Mono", "monospace"]
 )
+
+VIEW_URL_JS = """
+(modality, area, task, hvg, pub) => {
+  const url = new URL(window.location.href);
+  const values = { modality, area, task, hvg, public: pub };
+  const defaults = {
+    modality: "bulk-rna", area: "all", task: "all", hvg: "show", public: "show",
+  };
+  for (const [key, value] of Object.entries(values)) {
+    if (!value || value === defaults[key]) url.searchParams.delete(key);
+    else url.searchParams.set(key, value);
+  }
+  url.searchParams.delete("board");
+  window.history.replaceState(null, "", url);
+}
+"""
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
     "<p>One model, one modality. Partial coverage is fine within that modality. "
     "You are ranked on every board you cover in full.</p></div></div>"
 )
+PAGE_HEADS = {
+    "contribute": (
+        '<div class="pm-head"><div><h1>Contribute</h1>'
+        "<p>What PRIMO is missing, and how to add it.</p></div></div>"
+    ),
+    "method": (
+        '<div class="pm-head"><div><h1>Method</h1>'
+        "<p>How a model is scored, and what the pages show.</p></div></div>"
+    ),
+}
 
 MODALITY_CHOICES = [
     ("Bulk RNAseq", "bulk-rna"),
@@ -162,6 +211,7 @@ TABLE_SORT_JS = """
       cell.setAttribute("aria-sort", "none");
     });
     header.dataset.sortDirection = direction === 1 ? "asc" : "desc";
+    table.dataset.sorted = index === 0 && direction === 1 ? "" : "true";
     header.setAttribute("aria-sort", direction === 1 ? "ascending" : "descending");
   };
 
@@ -332,12 +382,6 @@ def _score_with_hvg(submission_path: str, modality: str) -> dict | None:
         return None
 
 
-def _rendered_board(slug: str | None) -> str:
-    """The Board page for ``slug`` -- re-rendered after a submission saves."""
-    by_id, boards, df, _ = _page_state()
-    return render_board(by_slug(boards, slug), df, by_id)
-
-
 def evaluate(
     submission_path: str,
     modality: str | None,
@@ -348,11 +392,10 @@ def evaluate(
     paper_link: str,
     hf_model_link: str,
     notes: str,
-    slug: str | None,
     profile: gr.OAuthProfile | None,
 ):
     def _refuse(message: str):
-        return message, _rendered_board(slug)
+        return message
 
     if profile is None:
         return _refuse("Please sign in with Hugging Face to submit.")
@@ -420,7 +463,7 @@ def evaluate(
             "\n\n⚠️ No valid scores were produced, so the model was not added to "
             "any board."
         )
-        return summary, _rendered_board(slug)
+        return summary
 
     hvg_result = _score_with_hvg(submission_path, modality)
     hvg_rows = (
@@ -456,13 +499,13 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ scored, but the embedding archive was not saved: {error}"
-        return summary, _rendered_board(slug)
+        return summary
     try:
         append_results(rows, TOKEN)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ archived, but the leaderboard was not saved: {error}"
-        return summary, _rendered_board(slug)
+        return summary
 
     summary += f"\n\n✅ **{model} is now shown on the relevant boards.**"
     if hvg_rows:
@@ -472,19 +515,81 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ Contact metadata was not saved: {error}"
-    return summary, _rendered_board(slug)
+    return summary
 
 
-def _landing_tab(params: dict, has_board: bool) -> str:
-    """Which page a visitor lands on: ``?tab=`` wins, then ``?board=``, else Boards.
+def _landing_tab(params: dict) -> str:
+    """Which page a visitor lands on: ``?tab=``, old board links included.
 
-    An unknown ``?tab=`` falls through to Boards rather than selecting nothing,
-    which would render the Space with every panel collapsed.
+    An unknown ``?tab=`` falls through to the leaderboard rather than selecting
+    nothing, which would render the Space with every panel collapsed.
     """
     tab = params.get("tab")
-    if tab in TAB_IDS:
-        return tab
-    return "board" if has_board else "boards"
+    tab = LEGACY_TABS.get(tab, tab)
+    return tab if tab in TAB_IDS else "leaderboard"
+
+
+def _initial_view(
+    params: dict, by_id: dict[str, dict], boards: list[Board]
+) -> tuple[str, str, str]:
+    """The pills a visitor lands on: an old ``?board=``, else the query, else Bulk."""
+    old = next((b for b in boards if b.slug == params.get("board")), None)
+    if old is not None:
+        return board_view(old, by_id)
+    modalities = [slug for _, slug in modality_choices(by_id)]
+    modality = params.get("modality")
+    if modality not in modalities:
+        modality = (
+            DEFAULT_MODALITY
+            if DEFAULT_MODALITY in modalities or not modalities
+            else modalities[0]
+        )
+    areas = [slug for _, slug in area_choices(by_id, modality)]
+    categories = [slug for _, slug in category_choices(by_id, modality)]
+    area = params.get("area") if params.get("area") in areas else ALL
+    category = params.get("task") if params.get("task") in categories else ALL
+    return modality, area, category
+
+
+def _view_name(by_id: dict[str, dict], modality: str, area: str, category: str) -> str:
+    """The view as its pills read, ``Bulk RNAseq · Oncology · All tasks``."""
+    modalities = {slug: name for name, slug in modality_choices(by_id)}
+    areas = {slug: name for name, slug in area_choices(by_id, modality)}
+    categories = {slug: name for name, slug in category_choices(by_id, modality)}
+    return " · ".join(
+        (
+            modalities.get(modality, modality),
+            "All areas" if area == ALL else areas.get(area, area),
+            "All tasks" if category == ALL else categories.get(category, category),
+        )
+    )
+
+
+def _render_view(
+    state: PageState, modality: str, area: str, category: str, hvg: str, public: str
+) -> str:
+    """The tables of the view the pills select, on the version on screen.
+
+    A pill clicked before the page has loaded has no state yet, and changes nothing.
+    """
+    if state is None:
+        return gr.skip()
+    by_id, _, df, version = state
+    board = view_board(by_id, modality, area, category)
+    if public == HIDE:
+        board = without_public(board, by_id)
+    name = _view_name(by_id, modality, area, category)
+    return render_view(board, df, by_id, name, hvg != HIDE, version)
+
+
+def _on_modality(state: PageState, modality: str, hvg: str, public: str):
+    """A new modality brings its own area and task pills, both back on All."""
+    by_id = state[0]
+    return (
+        gr.Radio(choices=area_choices(by_id, modality), value=ALL),
+        gr.Radio(choices=category_choices(by_id, modality), value=ALL),
+        _render_view(state, modality, ALL, ALL, hvg, public),
+    )
 
 
 def _viewed_version(params: dict) -> Version:
@@ -496,38 +601,34 @@ def _viewed_version(params: dict) -> Version:
 
 
 def _init(request: gr.Request):
-    """Render every page but Boards from one fetch, landing where the query asks.
+    """Render every page from one fetch, on the tab and the view the query asks.
 
-    Navigation reloads the page, so the Board page is rendered only when a visitor
-    lands on it. The fetched state is returned too, so ``_render_overview`` builds
-    Boards from it without a second round trip.
+    The fetched state is returned too, so a click on a pill re-renders the view
+    without a second round trip.
     """
     params = dict(request.query_params) if request else {}
     state = _page_state(_viewed_version(params))
     by_id, boards, df, version = state
-    board = by_slug(boards, params.get("board"))
-    selected = _landing_tab(params, bool(params.get("board") and board))
-    active_slug = board.slug if selected == "board" and board else None
-    active_tab = selected if selected in FOOT_TABS else None
+    tab = _landing_tab(params)
+    modality, area, category = _initial_view(params, by_id, boards)
+    hvg = HIDE if params.get("hvg") == HIDE else SHOW
+    public = HIDE if params.get("public") == HIDE else SHOW
     return (
-        gr.Tabs(selected=selected),
-        rail_html(boards, active_slug, active_tab, version),
-        board.slug if board else None,
+        gr.Tabs(selected=tab),
+        nav_html(tab, version),
+        hero_html(boards, df, version),
+        _render_view(state, modality, area, category, hvg, public),
+        gr.Radio(choices=modality_choices(by_id), value=modality),
+        gr.Radio(choices=area_choices(by_id, modality), value=area),
+        gr.Radio(choices=category_choices(by_id, modality), value=category),
+        gr.Radio(value=hvg),
+        gr.Radio(value=public),
         state,
         render_tasks(by_id),
         _about_text(by_id),
-        render_board(board, df, by_id) if selected == "board" else "",
+        history_html(df, version),
+        cta_html(boards, version),
     )
-
-
-def _render_overview(state: PageState) -> tuple[str, None]:
-    """The Boards page, rendered after ``_init``.
-
-    It rates every board, so it is the slowest page and must not hold back the
-    one a visitor landed on. The state is then released, as nothing reads it again.
-    """
-    by_id, boards, df, version = state
-    return render_boards(boards, df, by_id, version), None
 
 
 def build_demo() -> gr.Blocks:
@@ -539,90 +640,121 @@ def build_demo() -> gr.Blocks:
         js=TABLE_SORT_JS,
         fill_width=True,
     ) as demo:
-        active_board = gr.State(None)
         page_state = gr.State(None)
-        with gr.Row(elem_id="pm-shell"):
-            with gr.Column(elem_id="pm-rail"):
-                rail = gr.HTML()
-            with gr.Column(elem_id="pm-main"):
-                with gr.Tabs(elem_id="pm-pages") as pages:
-                    with gr.Tab("Boards", id="boards"):
-                        boards_html = gr.HTML()
-                    with gr.Tab("Board", id="board"):
-                        board_html = gr.HTML()
-                    with gr.Tab("Tasks", id="tasks"):
-                        tasks_html = gr.HTML()
-                    with gr.Tab("Submit", id="submit"):
-                        gr.HTML(SUBMIT_HEAD)
-                        with gr.Column(elem_classes=["pm-body"]):
-                            with gr.Row():
-                                with gr.Column(scale=3):
-                                    gr.Markdown(_page_text("submit"))
-                                with gr.Column(scale=2, elem_id="pm-form"):
-                                    gr.LoginButton()
-                                    modality_in = gr.Radio(
-                                        MODALITY_CHOICES,
-                                        label="Modality",
-                                        info="One model submission covers one modality.",
-                                    )
-                                    download_md = gr.Markdown(_download_help(None))
-                                    model_tb = gr.Textbox(
-                                        label="Model name",
-                                        placeholder="e.g. eva-rna-v1",
-                                        info="Shown on the leaderboard.",
-                                    )
-                                    institution_tb = gr.Textbox(
-                                        label="Institution (optional)",
-                                        placeholder="e.g. Scienta",
-                                        info="Shown on the leaderboard.",
-                                    )
-                                    author_submission_cb = gr.Checkbox(
-                                        label="Submitted by the model's authors",
-                                        info="Adds an Authors check next to the model name.",
-                                    )
-                                    email_tb = gr.Textbox(
-                                        label="Email address",
-                                        placeholder="you@lab.org",
-                                        info="Contact for this submission, kept private.",
-                                    )
-                                    notes_tb = gr.Textbox(
-                                        label="Training data / notes (optional)",
-                                        placeholder="e.g. pretrained on atlas X",
-                                        info="About the model or its training data.",
-                                    )
-                                    paper_tb = gr.Textbox(
-                                        label="Paper link (optional)",
-                                        placeholder="https://arxiv.org/abs/...",
-                                        info="Links the model name on the leaderboard.",
-                                    )
-                                    hf_tb = gr.Textbox(
-                                        label="Hugging Face model link (optional)",
-                                        placeholder="https://huggingface.co/...",
-                                    )
-                                    file_in = gr.File(
-                                        label="Submission (.csv / .tsv / .parquet / .npz)",
-                                        type="filepath",
-                                    )
-                                    run_btn = gr.Button(
-                                        "Evaluate",
-                                        elem_id="pm-evaluate",
-                                        elem_classes=[
-                                            "pm-btn",
-                                            "pm-btn--primary",
-                                            "pm-btn--block",
-                                        ],
-                                    )
-                                    status_html = gr.HTML(
-                                        evaluation_status(), visible=False
-                                    )
-                                    gr.HTML(evaluation_confirmation())
-                            result_md = gr.Markdown()
-                    with gr.Tab("Contribute", id="contribute"):
-                        with gr.Column(elem_classes=["pm-body", "pm-prose"]):
-                            gr.Markdown(_page_text("contribute"))
-                    with gr.Tab("Method", id="method"):
-                        with gr.Column(elem_classes=["pm-body", "pm-prose"]):
-                            about_md = gr.Markdown()
+        with gr.Column(elem_id="pm-site"):
+            nav = gr.HTML(padding=False)
+            with gr.Tabs(elem_id="pm-pages") as pages:
+                with gr.Tab("Leaderboard", id="leaderboard"):
+                    hero = gr.HTML(padding=False)
+                    gr.HTML(BOARD_SUB, padding=False)
+                    with gr.Row(elem_id="pm-controls"):
+                        modality_f = gr.Radio(
+                            label="Modality", elem_classes=["pm-seg", "pm-seg--main"]
+                        )
+                        area_f = gr.Radio(
+                            label="Therapeutic area",
+                            elem_classes=["pm-seg", "pm-seg--line"],
+                        )
+                        task_f = gr.Radio(
+                            label="Task", elem_classes=["pm-seg", "pm-seg--line"]
+                        )
+                        hvg_f = gr.Radio(
+                            TOGGLE_CHOICES,
+                            value=SHOW,
+                            label="+ HVG models",
+                            elem_classes=["pm-seg", "pm-seg--minor"],
+                        )
+                        public_f = gr.Radio(
+                            TOGGLE_CHOICES,
+                            value=SHOW,
+                            label="Public tasks",
+                            elem_classes=["pm-seg", "pm-seg--minor"],
+                        )
+                    board_html = gr.HTML(padding=False)
+                    history = gr.HTML(padding=False)
+                    cta = gr.HTML(padding=False)
+                with gr.Tab("Tasks", id="tasks"):
+                    tasks_html = gr.HTML(padding=False)
+                with gr.Tab("Submit", id="submit"):
+                    gr.HTML(SUBMIT_HEAD, padding=False)
+                    with gr.Column(elem_classes=["pm-body"]):
+                        with gr.Row(elem_id="pm-submit"):
+                            with gr.Column(scale=3):
+                                gr.Markdown(
+                                    _page_text("submit"),
+                                    elem_classes=["pm-prose", "pm-submit-text"],
+                                )
+                            with gr.Column(scale=2, elem_id="pm-form"):
+                                gr.LoginButton()
+                                modality_in = gr.Radio(
+                                    MODALITY_CHOICES,
+                                    label="Modality",
+                                    info="One model submission covers one modality.",
+                                    elem_classes=["pm-seg", "pm-seg--form"],
+                                )
+                                download_md = gr.Markdown(
+                                    _download_help(None), elem_classes=["pm-hint"]
+                                )
+                                model_tb = gr.Textbox(
+                                    label="Model name",
+                                    placeholder="e.g. my-model-v1",
+                                    info="Shown on the leaderboard.",
+                                )
+                                institution_tb = gr.Textbox(
+                                    label="Institution (optional)",
+                                    placeholder="e.g. Example University",
+                                    info="Shown on the leaderboard.",
+                                )
+                                author_submission_cb = gr.Checkbox(
+                                    label="Submitted by the model's authors",
+                                    info="Adds an Authors check next to the model name.",
+                                )
+                                email_tb = gr.Textbox(
+                                    label="Email address",
+                                    placeholder="Your contact email",
+                                    info="Contact for this submission, kept private.",
+                                )
+                                notes_tb = gr.Textbox(
+                                    label="Training data / notes (optional)",
+                                    placeholder="e.g. pretrained on atlas X",
+                                    info="About the model or its training data.",
+                                )
+                                paper_tb = gr.Textbox(
+                                    label="Paper link (optional)",
+                                    placeholder="https://arxiv.org/abs/...",
+                                    info="Links the model name on the leaderboard.",
+                                )
+                                hf_tb = gr.Textbox(
+                                    label="Hugging Face model link (optional)",
+                                    placeholder="https://huggingface.co/...",
+                                )
+                                file_in = gr.File(
+                                    label="Submission (.csv / .tsv / .parquet / .npz)",
+                                    type="filepath",
+                                )
+                                run_btn = gr.Button(
+                                    "Evaluate",
+                                    elem_id="pm-evaluate",
+                                    elem_classes=[
+                                        "pm-btn",
+                                        "pm-btn--primary",
+                                        "pm-btn--block",
+                                    ],
+                                )
+                                status_html = gr.HTML(
+                                    evaluation_status(), visible=False
+                                )
+                                gr.HTML(evaluation_confirmation())
+                        result_md = gr.Markdown()
+                with gr.Tab("Contribute", id="contribute"):
+                    gr.HTML(PAGE_HEADS["contribute"], padding=False)
+                    with gr.Column(elem_classes=["pm-body", "pm-prose"]):
+                        gr.Markdown(_page_text("contribute"))
+                with gr.Tab("Method", id="method"):
+                    gr.HTML(PAGE_HEADS["method"], padding=False)
+                    with gr.Column(elem_classes=["pm-body", "pm-prose"]):
+                        about_md = gr.Markdown()
+            gr.HTML(CREDIT, padding=False)
 
         evaluation_event = run_btn.click(
             lambda: gr.update(visible=True),
@@ -641,9 +773,8 @@ def build_demo() -> gr.Blocks:
                 paper_tb,
                 hf_tb,
                 notes_tb,
-                active_board,
             ],
-            [result_md, board_html],
+            result_md,
         )
         evaluation_event.then(
             lambda: gr.update(visible=False),
@@ -652,11 +783,37 @@ def build_demo() -> gr.Blocks:
             show_progress="hidden",
         )
         modality_in.change(_download_help, modality_in, download_md)
+
+        pills = [modality_f, area_f, task_f, hvg_f, public_f]
+        modality_f.input(
+            _on_modality,
+            [page_state, modality_f, hvg_f, public_f],
+            [area_f, task_f, board_html],
+            show_progress="hidden",
+        ).then(None, pills, None, js=VIEW_URL_JS)
+        for pill in pills[1:]:
+            pill.input(
+                _render_view,
+                [page_state, *pills],
+                board_html,
+                show_progress="hidden",
+            ).then(None, pills, None, js=VIEW_URL_JS)
         demo.load(
             _init,
             None,
-            [pages, rail, active_board, page_state, tasks_html, about_md, board_html],
-        ).success(_render_overview, page_state, [boards_html, page_state])
+            [
+                pages,
+                nav,
+                hero,
+                board_html,
+                *pills,
+                page_state,
+                tasks_html,
+                about_md,
+                history,
+                cta,
+            ],
+        )
     return demo
 
 

@@ -15,13 +15,10 @@ a broken page.
 
 import json
 import math
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from boards import (
-    AREA_GROUP,
-    MODALITY_GROUP,
     PUBLIC,
     Board,
     label,
@@ -57,24 +54,19 @@ ELO_REGULARIZATION = 0.1
 ELO_ANCHOR_MODEL = "HVG-1200-genes"
 
 
-@dataclass(frozen=True)
-class TopModel:
-    """One line of a home card's mini-ranking; ``elo`` is None when unavailable."""
-
-    name: str
-    elo: int | None
-
-
 class ModelCell(str):
     """String-compatible model label with paper-link and chip metadata.
 
-    ``is_hvg`` marks a ``<model> + HVG`` entry: the label is the parent name and
-    the tag is rendered as a chip.
+    ``is_hvg`` marks a ``<model> + HVG`` entry, whose label is the parent name.
+    ``is_baseline`` marks one of our baselines, whose label keeps its
+    ``(baseline)`` tag so it never merges with a model of the same name. The page
+    shows both flags as chips.
     """
 
     paper_link: str
     is_author_submission: bool
     is_hvg: bool
+    is_baseline: bool
 
     def __new__(
         cls,
@@ -82,11 +74,13 @@ class ModelCell(str):
         paper_link: str,
         is_author_submission: bool,
         is_hvg: bool = False,
+        is_baseline: bool = False,
     ) -> "ModelCell":
         cell = super().__new__(cls, label)
         cell.paper_link = paper_link
         cell.is_author_submission = is_author_submission
         cell.is_hvg = is_hvg
+        cell.is_baseline = is_baseline
         return cell
 
 
@@ -480,6 +474,7 @@ def ranked_table(
             entry["paper_link"],
             entry["is_author_submission"],
             is_hvg,
+            entry["is_baseline"],
         )
         row = {
             "Rank": position,
@@ -487,7 +482,6 @@ def ranked_table(
             "Institution": entry["institution"] or None,
             "Elo": round(entry["elo"]),
             "Mean rank": _round(entry["mean_rank"]),
-            "Mean score": _round(entry["mean_score"]),
             # Blank for baselines and ``+ HVG`` entries: we republish and re-sync
             # those, so their count measures our release cadence, not anyone tuning.
             "Submissions count": (
@@ -554,15 +548,14 @@ def per_task_table(
 
     rows = []
     displayed_sd: dict[tuple[int, str], tuple[float, int]] = {}
+    families = {str(t.get("category", "")) for t in scoped.values()}
+    areas = {str(t.get("therapeutic_area", "")) for t in scoped.values()}
     for task_id, task in sorted(scoped.items()):
-        row = {
-            "Task": _task_cell(task),
-            "Family": label(str(task.get("category", ""))),
-        }
-        if board.group != AREA_GROUP:
+        row = {"Task": _task_cell(task)}
+        if len(families) > 1:
+            row["Family"] = label(str(task.get("category", "")))
+        if len(areas) > 1:
             row["Area"] = str(task.get("therapeutic_area", ""))
-        if board.group != MODALITY_GROUP:
-            row["Modality"] = modality_label(str(task.get("modality", "")))
         row["Metric"] = metric_label(str(task.get("metric", "")))
         present = {m: scores[(task_id, m)] for m in models if (task_id, m) in scores}
         for model in models:
@@ -574,40 +567,6 @@ def per_task_table(
     table = pd.DataFrame(rows)
     table.attrs["repeat_standard_deviations"] = displayed_sd
     return table
-
-
-def top_models(
-    df: pd.DataFrame, by_id: dict[str, dict], board: Board, limit: int
-) -> list[TopModel]:
-    """Lists the board's best full-coverage entries, baselines ranked in place.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Persisted result rows.
-    by_id : dict[str, dict]
-        Task registry keyed by task id.
-    board : Board
-        Board to rank.
-    limit : int
-        Maximum number of entries to return.
-
-    Returns
-    -------
-    list[TopModel]
-        Leaders in rank order; ``elo`` is None when the rating is unavailable.
-    """
-    return [
-        TopModel(
-            name=str(e["model_name"]),
-            elo=(
-                round(e["elo"])
-                if math.isfinite(e["elo"]) and math.isfinite(e["rank"])
-                else None
-            ),
-        )
-        for e in _entries(df, by_id, board)[:limit]
-    ]
 
 
 TASK_COLUMNS = [

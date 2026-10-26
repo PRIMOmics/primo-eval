@@ -1,6 +1,6 @@
-PRIMO is an open benchmark, and it is **deliberately incomplete**. The **Boards**
-page shows exactly how far it reaches today, the live boards, and names the
-gaps as open cards.
+PRIMO is an open benchmark, and it is **deliberately incomplete**. The
+**Leaderboard** page shows how far it reaches today, and its last panel names
+the gaps.
 
 PRIMO was started by **Scienta** and **Hugging Face**. The intent is community governance; how
 that actually works is part of what the first partners will define.
@@ -33,8 +33,8 @@ much as data does.
 
 ## Add a modality or a therapeutic area
 
-The **OPEN** cards on the Boards page mark the omics layers and clinical areas
-PRIMO does not reach yet. Read them as gaps waiting for someone rather than as a roadmap we
+The last panel of the **Leaderboard** page names the omics layers and clinical
+areas PRIMO does not reach yet. Read them as gaps waiting for someone rather than as a roadmap we
 are already working through. Opening one takes a single cohort with clinical
 labels, and not a whole atlas.
 

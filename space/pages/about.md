@@ -49,19 +49,17 @@ embedding concatenated with the `HVG-1200-genes` features of each sample. The
 embedding is scaled to unit length, the 1,200 log-normalized genes are appended,
 and the concatenated row is scaled to unit length again before the same probe.
 It shows whether a model adds information that expression alone does not carry.
-These rows are shown by default; untick **Include models + HVG** on a board to
-hide them, which re-ranks the board and refits Elo without them.
+These rows are shown by default; set **+ HVG models** to **Hide** to hide them,
+which re-ranks the board and refits Elo without them.
 
-Every board also shows a **Mean score**: the average of the model's scores on
-the tasks of the board. Elo orders the rows, not this mean. When a board holds
-more than one metric, this mean mixes them, so do the real comparison on the
-family columns.
+Elo orders the rows. Each task family keeps its own column, in its own metric,
+and no column averages across metrics.
 
 ## How the results are organised
 
 A **board** is a self-contained leaderboard over a slice of the benchmark: the
-whole modality, one therapeutic area, or one task family. Pick one from the rail,
-or on the **Boards** page.
+whole modality, one therapeutic area, one task family, or an area and a family
+together. Pick it with the pills of the **Leaderboard** page.
 
 A board ranks only the models that covered **all of its tasks**. Skipping
 Infectious diseases therefore costs you nothing on the Oncology board.

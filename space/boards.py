@@ -3,21 +3,21 @@
 A *board* is a self-contained leaderboard over a subset of the registry -- every
 task of a modality, of a therapeutic area, or of a task family. Coverage is
 judged INSIDE a board, so a model that covered every Oncology task is ranked
-on the Oncology board even though it skipped Infectious diseases. That is the whole
-point of showing boards as cards: each one is a real, enterable leaderboard, not
-a view filter.
+on the Oncology board even though it skipped Infectious diseases. Each board is
+a real leaderboard, not a view filter.
 
-Modality stays the wall for every board. Therapeutic-area and task-category
-boards are named with their modality so every card maps to one unambiguous
-leaderboard and models from different omics layers are never ranked together.
+Modality stays the wall for every board, so models from different omics layers
+are never ranked together. The leaderboard page picks a board with three pills:
+modality, therapeutic area and task family. ``view_board`` builds the board of
+any such view, area and family crossed included.
 
-``OPEN_BOARDS`` names the slices PRIMO does NOT cover, so the home page states
-its own gaps instead of implying the registry is the whole territory. They are a
+``OPEN_BOARDS`` names the slices PRIMO does NOT cover, so the page states its own
+gaps instead of implying the registry is the whole territory. They are a
 hand-written constant, not a roadmap: a slice belongs here when a contributor
 could plausibly bring it, and it disappears on its own the day the registry
 covers it.
 
-Modalities and therapeutic areas get open cards; task categories deliberately do
+Modalities and therapeutic areas get open slices; task categories deliberately do
 not. A category is an enum whose members are each pinned to a single metric, so
 naming an open one ("biomarker discovery") would advertise a scoring rule that
 does not exist. Modalities and areas only need a cohort.
@@ -41,23 +41,12 @@ MODALITY_LABEL = {
     "Single Cell RNA": "Single-cell RNAseq",
     "single-cell RNA": "Single-cell RNAseq",
 }
-BOARD_MODALITY_LABEL = {
-    "bulk RNA": "bulk RNAseq",
-    "Single Cell RNA": "scRNAseq",
-    "single-cell RNA": "scRNAseq",
-}
 
 MODALITY_GROUP = "Per modality"
 AREA_GROUP = "Per therapeutic areas"
 CATEGORY_GROUP = "Task Category"
 OTHER_AREA = "Other"
 PUBLIC = "public"
-
-GROUP_NOTE = {
-    MODALITY_GROUP: "Every task of one omics layer",
-    AREA_GROUP: "Per-indication leaderboards",
-    CATEGORY_GROUP: "Per-question leaderboards",
-}
 
 CODE_LENGTH = 3
 FALLBACK_CODE = "n/a"
@@ -71,7 +60,6 @@ CATEGORY_BLURB = {
     "perturbation_prediction": "How will treatment change this patient's expression?",
 }
 
-N_FEATURED = 3
 MAX_LISTED = 3
 
 
@@ -138,14 +126,6 @@ class Board:
     @property
     def n_tasks(self) -> int:
         return len(self.task_ids)
-
-
-def board_label(board: Board) -> str:
-    """Name a scoped board with the modality that defines its leaderboard."""
-    if board.group == MODALITY_GROUP:
-        return board.name
-    modality = BOARD_MODALITY_LABEL.get(board.modality, modality_label(board.modality))
-    return f"{board.name} - {modality}"
 
 
 def _join(values: list[str]) -> str:
@@ -276,8 +256,7 @@ class OpenBoard:
     """A slice nobody can be ranked on yet: a stated gap, not a leaderboard.
 
     Deliberately not a ``Board``: it has no tasks, no cohorts and no patients, and
-    zeroing those fields would print "0 patients" on a card whose whole job is to
-    read as an invitation.
+    zeroing those fields would print "0 patients" where the page invites a cohort.
     """
 
     group: str
@@ -315,17 +294,17 @@ OPEN_BOARDS: tuple[OpenBoard, ...] = (
 
 
 def in_group(boards: list[Board], group: str) -> list[Board]:
-    """Cards of one section, biggest first -- the fullest board reads as the headline."""
+    """The boards of one group, biggest first."""
     return sorted(
         (b for b in boards if b.group == group), key=lambda b: (-b.n_tasks, b.name)
     )
 
 
 def open_in_group(boards: list[Board], group: str) -> list[OpenBoard]:
-    """Open cards of one section, minus any slice the registry has since covered.
+    """Open slices of one group, minus any slice the registry has since covered.
 
     The day a single-cell cohort lands, its board is built from the registry and
-    the matching open card drops out with no edit here.
+    the matching open slice drops out with no edit here.
     """
     covered = {board.name.lower() for board in in_group(boards, group)}
     return [
@@ -335,17 +314,62 @@ def open_in_group(boards: list[Board], group: str) -> list[OpenBoard]:
     ]
 
 
-def featured(boards: list[Board]) -> list[Board]:
-    """The hero row: every modality board, topped up with the largest others."""
-    heroes = in_group(boards, MODALITY_GROUP)
-    rest = [b for b in boards if b.group != MODALITY_GROUP]
-    rest.sort(key=lambda b: (-b.n_tasks, b.name))
-    return (heroes + rest)[:N_FEATURED]
+ALL = "all"
 
 
-def by_slug(boards: list[Board], slug: str | None) -> Board | None:
-    """Resolve a ``?board=`` query param; unknown or missing falls back to the hero."""
-    for board in boards:
-        if board.slug == slug:
-            return board
-    return featured(boards)[0] if boards else None
+def _within(by_id: dict[str, dict], modality: str) -> list[dict]:
+    """The tasks of the modality whose slug is ``modality``."""
+    return [t for t in by_id.values() if slugify(str(t.get("modality"))) == modality]
+
+
+def modality_choices(by_id: dict[str, dict]) -> list[tuple[str, str]]:
+    """One ``(label, slug)`` pill per modality of the registry."""
+    choices = {
+        slugify(m): modality_label(m) for m in distinct(by_id.values(), "modality")
+    }
+    return [(name, slug) for slug, name in choices.items()]
+
+
+def area_choices(by_id: dict[str, dict], modality: str) -> list[tuple[str, str]]:
+    """The therapeutic-area pills of a modality, "All" first and no "Other"."""
+    areas = distinct(_within(by_id, modality), "therapeutic_area")
+    return [("All", ALL)] + [(a, slugify(a)) for a in areas if a != OTHER_AREA]
+
+
+def category_choices(by_id: dict[str, dict], modality: str) -> list[tuple[str, str]]:
+    """The task-category pills of a modality, "All" first."""
+    categories = distinct(_within(by_id, modality), "category")
+    return [("All", ALL)] + [(label(c), slugify(c)) for c in categories]
+
+
+def view_board(
+    by_id: dict[str, dict], modality: str, area: str, category: str
+) -> Board:
+    """The board of one view: a modality's tasks, narrowed by area and category."""
+    within = _within(by_id, modality)
+    tasks = [
+        t
+        for t in within
+        if area in (ALL, slugify(str(t.get("therapeutic_area"))))
+        and category in (ALL, slugify(str(t.get("category"))))
+    ]
+    raw_modality = str(within[0]["modality"]) if within else modality
+    if area == ALL and category == ALL:
+        return _board(MODALITY_GROUP, raw_modality, raw_modality, tasks)
+    if category == ALL:
+        name = str(tasks[0]["therapeutic_area"]) if tasks else area
+        return _board(AREA_GROUP, name, raw_modality, tasks)
+    name = str(tasks[0]["category"]) if tasks else category
+    return _board(CATEGORY_GROUP, name, raw_modality, tasks)
+
+
+def board_view(board: Board, by_id: dict[str, dict]) -> tuple[str, str, str]:
+    """The ``(modality, area, category)`` pills that show an old ``?board=`` link."""
+    task = next((by_id[t] for t in sorted(board.task_ids) if t in by_id), {})
+    area = ALL
+    category = ALL
+    if board.group == AREA_GROUP and task:
+        area = slugify(str(task.get("therapeutic_area")))
+    if board.group == CATEGORY_GROUP and task:
+        category = slugify(str(task.get("category")))
+    return slugify(board.modality), area, category
