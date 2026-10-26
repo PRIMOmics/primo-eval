@@ -86,8 +86,9 @@ uv run primo download --modality bulk-rna
 
 The data comes from the
 [`PRIMOmics/primo`](https://huggingface.co/datasets/PRIMOmics/primo) dataset on the
-Hugging Face Hub. It is public, so you need no account. `primo download` always
-fetches the latest commit, into `primo-data/` by default (`--data-dir` changes it):
+Hugging Face Hub. It is public, so you need no account. `primo download` fetches
+the commit that the leaderboard scores, into `primo-data/` by default
+(`--data-dir` changes it):
 
 - `datasets.yaml` lists every dataset, with its `id`, `modality` and `path`;
 - one `expression.h5ad` per dataset;
@@ -96,8 +97,8 @@ fetches the latest commit, into `primo-data/` by default (`--data-dir` changes i
 
 Use `--public-only` for the datasets that carry a public task, or `--datasets` for a
 comma-separated list of ids. To be ranked on every board, download and embed every
-dataset: a board ranks only the models that cover all its tasks. Run the command again
-to get the latest data.
+dataset: a board ranks only the models that cover all its tasks. A new release of
+primo-eval can move to newer data: run the command again after you update.
 
 ### 🧠 4. Embed the datasets
 
@@ -209,8 +210,8 @@ uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
 ```
 
 `primo submit` runs the checks of `primo evaluate`, and checks that each dataset of
-the file is still the latest one on the Hub. If a dataset changed, download it again
-(step 3), then embed it again. `--dry-run` runs every
+the file is still the one that the leaderboard scores. If a dataset changed, download
+it again (step 3), then embed it again. `--dry-run` runs every
 check and sends nothing. Without it, the command sends the file to the
 [leaderboard Space](https://huggingface.co/spaces/PRIMOmics/primo-eval), which scores
 every task, the private ones included, and publishes the scores. Scoring takes a few

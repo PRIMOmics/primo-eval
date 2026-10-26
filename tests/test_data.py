@@ -11,6 +11,7 @@ from conftest import (
     signal_blocks,
     write_submission,
 )
+from versions import CURRENT
 
 from primomics import data
 from primomics.errors import EvaluatorError, SubmissionError
@@ -40,6 +41,21 @@ def test_download_fetches_one_modality_and_its_public_labels(fake_hub, tmp_path)
     assert [entry["id"] for entry in result.datasets] == ["d901", "d902"]
     assert result.labelled == {"d901": ["t901"], "d902": []}
     assert result.unlabelled == ["t905"]
+
+
+def test_the_data_commit_is_the_one_the_board_reads():
+    assert data.DATA_REVISION == CURRENT.data
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "asked"), [({}, data.DATA_REVISION), ({"revision": "main"}, "main")]
+)
+def test_download_reads_the_board_commit_unless_told_otherwise(
+    fake_hub, tmp_path, kwargs, asked
+):
+    data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, **kwargs)
+
+    assert fake_hub.requested[0] == asked
 
 
 def test_download_reports_the_size_of_the_selection(fake_hub, tmp_path):
@@ -156,7 +172,7 @@ def test_a_perturbation_task_needs_its_targets(fake_hub, tmp_path):
 
 
 def test_a_failed_hub_call_is_an_evaluator_error(fake_hub, tmp_path, monkeypatch):
-    def offline(repo_id):
+    def offline(repo_id, revision=None):
         raise ConnectionError("no network")
 
     monkeypatch.setattr(fake_hub, "dataset_info", offline)
@@ -325,6 +341,17 @@ def test_locked_files_keep_the_manifest_and_the_given_datasets_and_tasks(local_d
 
 def test_changed_datasets_is_empty_when_the_lock_matches_the_hub(fake_hub, local_data):
     assert data.changed_datasets(local_data, DATASETS[:2]) == []
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "asked"), [({}, data.DATA_REVISION), ({"revision": "main"}, "main")]
+)
+def test_changed_datasets_compares_with_the_board_commit_unless_told_otherwise(
+    fake_hub, local_data, kwargs, asked
+):
+    data.changed_datasets(local_data, DATASETS[:2], **kwargs)
+
+    assert fake_hub.requested == [asked]
 
 
 def test_changed_datasets_lists_changed_and_unlocked_files(fake_hub, local_data):
