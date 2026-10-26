@@ -31,15 +31,23 @@ parent's owner, credits and submission id. It shows what a model adds on top of
 plain expression. The features live privately at ``HVG_REFERENCE_FILE``, next
 to the results. They are read at the commit the board version pins, so a new
 upload is used only once a release pins it.
+
+The Space and ``rescore.py`` both append to the same CSV files. An append reads
+a file at the latest commit, adds its rows, and uploads the whole file on top of
+that commit only. If another write lands in between, the Hub refuses the upload,
+and the append reads the file again, up to ``WRITE_ATTEMPTS`` times. So two
+appends that cross never lose a row.
 """
 
 import hashlib
 import io
 import json
+from collections.abc import Callable
+from http import HTTPStatus
 from pathlib import Path
 
 import pandas as pd
-from evaluator import EMBEDDING, RESULTS_REPO, load_submission
+from evaluator import EMBEDDING, RESULTS_REPO, EvaluatorError, load_submission
 from versions import CURRENT
 
 RESULTS_FILE = "task_results.csv"
@@ -90,6 +98,7 @@ HVG_REFERENCE_MODEL = "HVG-1200-genes"
 HVG_REFERENCE_FILE = f"baselines/{HVG_REFERENCE_MODEL}/submission.parquet"
 ARCHIVE_DIR = "models"
 ARCHIVE_MANIFEST = "manifest.json"
+WRITE_ATTEMPTS = 3
 
 
 def with_baseline_flag(df: pd.DataFrame) -> pd.DataFrame:
@@ -252,32 +261,66 @@ def task_rows(
     ]
 
 
-def read_csv(filename: str, columns: list[str], token: str | None) -> pd.DataFrame:
-    """One CSV from the private results dataset; an absent file is an empty table."""
+def read_csv(
+    filename: str, columns: list[str], token: str | None, revision: str | None = None
+) -> pd.DataFrame:
+    """One CSV of the private results dataset, at ``revision`` or the latest commit.
+
+    An absent file is an empty table.
+    """
     from huggingface_hub import hf_hub_download
     from huggingface_hub.utils import EntryNotFoundError, RepositoryNotFoundError
 
     try:
-        path = hf_hub_download(RESULTS_REPO, filename, repo_type="dataset", token=token)
+        path = hf_hub_download(
+            RESULTS_REPO, filename, repo_type="dataset", token=token, revision=revision
+        )
     except (RepositoryNotFoundError, EntryNotFoundError):
         return pd.DataFrame(columns=columns)
     return pd.read_csv(path, dtype={VERSION: str})
 
 
-def upload_csv(filename: str, df: pd.DataFrame, token: str | None) -> None:
-    """Overwrite one CSV in the private results dataset."""
+def upload_csv(
+    filename: str, df: pd.DataFrame, token: str | None, parent_commit: str
+) -> None:
+    """Overwrite one CSV, unless a commit landed on top of ``parent_commit``."""
     from huggingface_hub import HfApi
 
-    api = HfApi(token=token)
-    api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
     buffer = io.BytesIO()
     df.to_csv(buffer, index=False)
     buffer.seek(0)
-    api.upload_file(
+    HfApi(token=token).upload_file(
         path_or_fileobj=buffer,
         path_in_repo=filename,
         repo_id=RESULTS_REPO,
         repo_type="dataset",
+        parent_commit=parent_commit,
+    )
+
+
+def _append_csv(
+    filename: str, extended: Callable[[str], pd.DataFrame], token: str | None
+) -> None:
+    """Upload ``extended(head)``: the CSV read at commit ``head``, plus new rows.
+
+    When another write lands first, read the CSV again at the new head.
+    """
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+
+    api = HfApi(token=token)
+    api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
+    for _ in range(WRITE_ATTEMPTS):
+        head = api.dataset_info(RESULTS_REPO).sha
+        try:
+            upload_csv(filename, extended(head), token, head)
+            return
+        except HfHubHTTPError as error:
+            if error.response.status_code != HTTPStatus.PRECONDITION_FAILED:
+                raise
+    raise EvaluatorError(
+        f"another write changed {filename} during each of {WRITE_ATTEMPTS} "
+        "attempts, so these rows were not saved: try again"
     )
 
 
@@ -359,7 +402,7 @@ def archive_submission(
     )
 
 
-def read_results(token: str | None) -> pd.DataFrame:
+def read_results(token: str | None, revision: str | None = None) -> pd.DataFrame:
     """Every persisted task score, with baseline, credit and version normalised."""
     return with_version(
         with_submission_id(
@@ -368,7 +411,7 @@ def read_results(token: str | None) -> pd.DataFrame:
                     with_institution(
                         with_owner(
                             with_baseline_flag(
-                                read_csv(RESULTS_FILE, RESULT_COLUMNS, token)
+                                read_csv(RESULTS_FILE, RESULT_COLUMNS, token, revision)
                             )
                         )
                     )
@@ -382,10 +425,12 @@ def append_results(rows: list[dict], token: str | None) -> None:
     """Append scored rows to the leaderboard, keeping the history intact."""
     if not rows:
         return
-    df = pd.concat([read_results(token), pd.DataFrame(rows)], ignore_index=True)
-    upload_csv(
-        RESULTS_FILE,
-        with_version(
+
+    def extended(head: str) -> pd.DataFrame:
+        df = pd.concat(
+            [read_results(token, head), pd.DataFrame(rows)], ignore_index=True
+        )
+        return with_version(
             with_submission_id(
                 with_paper_link(
                     with_author_submission_flag(
@@ -393,15 +438,21 @@ def append_results(rows: list[dict], token: str | None) -> None:
                     )
                 )
             )
-        ),
-        token,
-    )
+        )
+
+    _append_csv(RESULTS_FILE, extended, token)
 
 
 def append_submission(meta: dict, token: str | None) -> None:
     """Persist private contact metadata with matching public-credit fields."""
-    df = pd.concat(
-        [read_csv(SUBMISSIONS_FILE, SUBMISSION_COLUMNS, token), pd.DataFrame([meta])],
-        ignore_index=True,
-    )
-    upload_csv(SUBMISSIONS_FILE, df, token)
+
+    def extended(head: str) -> pd.DataFrame:
+        return pd.concat(
+            [
+                read_csv(SUBMISSIONS_FILE, SUBMISSION_COLUMNS, token, head),
+                pd.DataFrame([meta]),
+            ],
+            ignore_index=True,
+        )
+
+    _append_csv(SUBMISSIONS_FILE, extended, token)
