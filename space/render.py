@@ -192,7 +192,7 @@ def _score_columns(df: pd.DataFrame) -> list[str]:
 def _score_guide(col: str, row: pd.Series) -> str | None:
     """Return metric context for a native score cell, when identifiable."""
     metric = next((name for name in METRIC_GUIDES if f"({name})" in col), None)
-    if metric is None and col not in {"Elo", "Mean rank", "Mean score"}:
+    if metric is None and col not in {"Elo", "Mean rank"}:
         metric = str(row.get("Metric", ""))
     return METRIC_GUIDES.get(metric) if metric is not None else None
 

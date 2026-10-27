@@ -354,7 +354,7 @@ def _entries(df: pd.DataFrame, by_id: dict[str, dict], board: Board) -> list[dic
 
 
 def _comparison_stats(entries: list[dict], task_ids: set[str]) -> None:
-    """Add Bradley-Terry Elo, mean rank and mean score to ``entries`` in place.
+    """Add Bradley-Terry Elo and mean rank to ``entries`` in place.
 
     Battles are played split by split, a pair's splits sharing weight one per
     task. ``ELO_ANCHOR_MODEL`` is pinned during the fit, not shifted after,
@@ -432,7 +432,6 @@ def _comparison_stats(entries: list[dict], task_ids: set[str]) -> None:
         entry["mean_rank"] = (
             float(np.mean(ranks[index])) if ranks[index] else float("nan")
         )
-        entry["mean_score"] = float(np.mean(list(entry["task_scores"].values())))
 
 
 def ranked_table(
