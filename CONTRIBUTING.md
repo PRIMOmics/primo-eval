@@ -167,3 +167,8 @@ uv run hf upload PRIMOmics/primo-eval "$tmp/space" . --repo-type space \
   always keeps `.gitattributes`.
 - The commit message says which release the Space runs.
 - If your account cannot write to the Space, the Hub refuses the upload.
+- The Space rebuilds after the upload. When it shows "Running", open it and check
+  that the leaderboard loads, that the badge shows the board version (`v0.1` for
+  every `v0.1.x` release), that a pill changes the table, and that the Submit page
+  opens.
+- To roll back, deploy the previous tag with the same command.
