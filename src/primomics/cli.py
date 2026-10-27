@@ -47,7 +47,7 @@ from primomics.evaluate import (
     score_all,
 )
 from primomics.submission import DATASET_ID, norm_id
-from primomics.submit import PUBLISHED, REFUSED, SPACE, submit
+from primomics.submit import MAX_FILE_BYTES, PUBLISHED, REFUSED, SPACE, submit
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
 logger = logging.getLogger(__name__)
@@ -264,6 +264,12 @@ def _evaluate(args: argparse.Namespace) -> None:
 def _submit(args: argparse.Namespace) -> None:
     """Run ``primo submit``."""
     verdicts, manifest = _checked(args)
+    size = Path(args.submission).stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise SubmissionError(
+            f"the file weighs {_size(size)}, and the Space takes "
+            f"{_size(MAX_FILE_BYTES)} at most"
+        )
     in_file = [entry for entry in manifest if norm_id(entry["id"]) in verdicts]
     changed = changed_datasets(args.data_dir, in_file)
     if changed:

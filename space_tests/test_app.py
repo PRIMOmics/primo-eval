@@ -298,7 +298,10 @@ def test_hvg_tag_is_reserved(monkeypatch):
 
 
 def test_the_interface_builds_as_on_the_space():
-    """Outside a Space, the Gradio login needs a local token, so the env fakes a Space."""
+    """Outside a Space, the Gradio login needs a local token, so the env fakes a Space.
+
+    The web form and the ``/submit`` endpoint share one queue.
+    """
     space_env = {
         "SYSTEM": "spaces",
         "SPACE_ID": "owner/space",
@@ -307,8 +310,13 @@ def test_the_interface_builds_as_on_the_space():
         "OAUTH_SCOPES": "openid profile",
         "OPENID_PROVIDER_URL": "https://huggingface.co",
     }
+    script = (
+        "import app; demo = app.build_demo(); "
+        "queues = {fn.api_name: fn.concurrency_id for fn in demo.fns.values()}; "
+        "assert queues['submit'] == queues['evaluate'] == app.SUBMISSIONS, queues"
+    )
     subprocess.run(
-        [sys.executable, "-c", "import app; app.build_demo()"],
+        [sys.executable, "-c", script],
         cwd=Path(app.__file__).parent,
         env={**os.environ, **space_env},
         check=True,

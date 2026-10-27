@@ -198,8 +198,9 @@ code 1.
 
 Log in to Hugging Face once, with an access token from your
 [settings](https://huggingface.co/settings/tokens). On a server, you can set the
-`HF_TOKEN` environment variable instead. Then, from the clone, check the file and
-send it:
+`HF_TOKEN` environment variable instead. `primo submit` sends this token to the
+Space, so use a token with read access only. Then, from the clone, check the file
+and send it:
 
 ```bash
 uv run hf auth login
@@ -215,8 +216,10 @@ it again (step 3), then embed it again. `--dry-run` runs every
 check and sends nothing. Without it, the command sends the file to the
 [leaderboard Space](https://huggingface.co/spaces/PRIMOmics/primo-eval), which scores
 every task, the private ones included, and publishes the scores. Scoring takes a few
-minutes. The Space reads your Hugging Face token only to know who submits: a model
-name stays with the account that first used it. `--institution`, `--authors`,
+minutes. The Space reads your Hugging Face token only to know who submits, and
+never stores it: a model name stays with the account that first used it. An
+account can publish 4 submissions in 24 hours, and a file can weigh 500 MB at
+most. `--institution`, `--authors`,
 `--paper-link`, `--hf-model` and `--notes` fill the other fields of the web form.
 
 #### 🌐 In the browser

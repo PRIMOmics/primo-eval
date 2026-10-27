@@ -106,6 +106,18 @@ from results import (
     task_rows,
     version_rows,
 )
+from submit_api import (
+    ERROR,
+    MAX_FILE_SIZE,
+    PUBLISHED,
+    REFUSED,
+    SUBMISSIONS,
+    SUBMISSIONS_PER_DAY,
+    SUBMITTED_AT,
+    recent_submissions,
+    reply,
+    route,
+)
 from versions import CURRENT, VERSIONS, Version
 
 HERE = Path(__file__).parent
@@ -348,7 +360,8 @@ def _results_frame() -> pd.DataFrame:
     """Every published row, or an empty frame if the fetch fails.
 
     A Hugging Face hiccup must not block a submission, so an empty frame leaves
-    the name free rather than raising: fail-open on the ownership check.
+    the name free rather than raising: fail-open on the ownership check and
+    on the limit of submissions per day.
     """
     try:
         return read_results(TOKEN)
@@ -381,8 +394,8 @@ def _score_with_hvg(submission_path: str, modality: str) -> dict | None:
         return None
 
 
-def evaluate(
-    submission_path: str,
+def run_submission(
+    submission_path: str | None,
     modality: str | None,
     model_name: str,
     institution: str,
@@ -391,12 +404,18 @@ def evaluate(
     paper_link: str,
     hf_model_link: str,
     notes: str,
-    profile: gr.OAuthProfile | None,
-):
-    def _refuse(message: str):
-        return message
+    username: str | None,
+) -> dict:
+    """Check, score and save one submission, for the web form and ``/submit``.
 
-    if profile is None:
+    The reply holds the ``status``, ``message`` and ``submission_id`` that
+    ``primo submit`` reads.
+    """
+
+    def _refuse(message: str) -> dict:
+        return reply(REFUSED, message)
+
+    if not username:
         return _refuse("Please sign in with Hugging Face to submit.")
     if not modality:
         return _refuse("Please select a modality.")
@@ -424,11 +443,19 @@ def evaluate(
         )
     published = _results_frame()
     claimed = _claimed_by(published, model)
-    if claimed and claimed != profile.username:
+    if claimed and claimed != username:
         return _refuse(
             f"The model name `{model}` is already submitted by another HF account. "
             "Resubmission of the same model is allowed only from the same HF account. "
             "Please pick another name."
+        )
+    if (
+        recent_submissions(published, username, datetime.now(timezone.utc))
+        >= SUBMISSIONS_PER_DAY
+    ):
+        return _refuse(
+            f"An account can publish {SUBMISSIONS_PER_DAY} submissions in 24 "
+            "hours. Please try again later."
         )
     try:
         result = score_all(
@@ -438,20 +465,21 @@ def evaluate(
         return _refuse(f"❌ {error}")
     except EvaluatorError as error:
         traceback.print_exc()
-        return _refuse(
+        return reply(
+            ERROR,
             "⚠️ We couldn't evaluate your submission. This is on our side, not your "
-            f"file. Please try again in a moment.\n\n`{error}`"
+            f"file. Please try again in a moment.\n\n`{error}`",
         )
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
-        return _refuse(f"⚠️ Unexpected evaluation error (our side): {error}")
+        return reply(ERROR, f"⚠️ Unexpected evaluation error (our side): {error}")
 
     summary = _summary(result, model)
     now = datetime.now(timezone.utc)
-    submitted_at = now.strftime("%Y-%m-%d %H:%M:%S.%f")
+    submitted_at = now.strftime(SUBMITTED_AT)
     submission_id = f"{now.strftime('%Y%m%dT%H%M%S.%fZ')}-{uuid4().hex}"
     credits = {
-        OWNER: profile.username,
+        OWNER: username,
         INSTITUTION: (institution or "").strip(),
         IS_AUTHOR_SUBMISSION: bool(is_author_submission),
         PAPER_LINK: (paper_link or "").strip(),
@@ -462,7 +490,7 @@ def evaluate(
             "\n\n⚠️ No valid scores were produced, so the model was not added to "
             "any board."
         )
-        return summary
+        return _refuse(summary)
 
     hvg_result = _score_with_hvg(submission_path, modality)
     hvg_rows = (
@@ -498,13 +526,13 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ scored, but the embedding archive was not saved: {error}"
-        return summary
+        return reply(ERROR, summary)
     try:
         append_results(rows, TOKEN)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ archived, but the leaderboard was not saved: {error}"
-        return summary
+        return reply(ERROR, summary, submission_id)
 
     summary += f"\n\n✅ **{model} is now shown on the relevant boards.**"
     if hvg_rows:
@@ -514,7 +542,34 @@ def evaluate(
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         summary += f"\n\n⚠️ Contact metadata was not saved: {error}"
-    return summary
+    return reply(PUBLISHED, summary, submission_id)
+
+
+def evaluate(
+    submission_path: str,
+    modality: str | None,
+    model_name: str,
+    institution: str,
+    is_author_submission: bool,
+    email: str,
+    paper_link: str,
+    hf_model_link: str,
+    notes: str,
+    profile: gr.OAuthProfile | None,
+):
+    """The web form: the shared submission path, then the page's answer."""
+    return run_submission(
+        submission_path,
+        modality,
+        model_name,
+        institution,
+        is_author_submission,
+        email,
+        paper_link,
+        hf_model_link,
+        notes,
+        None if profile is None else profile.username,
+    )["message"]
 
 
 def _landing_tab(params: dict) -> str:
@@ -775,7 +830,9 @@ def build_demo() -> gr.Blocks:
                 notes_tb,
             ],
             result_md,
+            concurrency_id=SUBMISSIONS,
         )
+        gr.api(route(run_submission), api_name="submit", concurrency_id=SUBMISSIONS)
         evaluation_event.then(
             lambda: gr.update(visible=False),
             None,
@@ -823,4 +880,5 @@ if __name__ == "__main__":
         server_port=7860,
         ssr_mode=False,
         allowed_paths=ALLOWED_PATHS,
+        max_file_size=MAX_FILE_SIZE,
     )

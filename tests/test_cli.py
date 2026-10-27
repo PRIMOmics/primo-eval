@@ -399,6 +399,18 @@ def test_submit_stops_on_a_failed_check(
     assert fake_space.calls == []
 
 
+def test_submit_refuses_a_file_over_the_limit_of_the_space(
+    fake_hub, logged_in, public_tasks, local_data, tmp_path, monkeypatch, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    monkeypatch.setattr(cli, "MAX_FILE_BYTES", submission.stat().st_size - 1)
+
+    code = _submit(submission, local_data, "--dry-run")
+
+    assert code == 1
+    assert "the Space takes" in caplog.text
+
+
 @pytest.mark.parametrize(("status", "code"), [("refused", 1), ("error", 2)])
 def test_submit_maps_the_reply_of_the_space_to_an_exit_code(
     fake_hub,
