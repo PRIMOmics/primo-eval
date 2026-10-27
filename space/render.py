@@ -452,9 +452,9 @@ def _hero_art() -> str:
     """The hero figure: a patient's omics, a model, one embedding, many tasks."""
     parts = [
         _art_text(58, 22, "Patient omics", "pm-art-h"),
-        _art_text(170, 22, "Your model", "pm-art-h"),
-        _art_text(248, 22, "Embedding", "pm-art-h"),
-        _art_text(348, 22, "Clinical tasks", "pm-art-h"),
+        _art_text(162, 22, "Your model", "pm-art-h"),
+        _art_text(254, 22, "Embedding", "pm-art-h"),
+        _art_text(351, 22, "Clinical tasks", "pm-art-h"),
         '<circle class="pm-art-patient" cx="58" cy="44" r="8"></circle>',
         '<path class="pm-art-patient" d="M45 66 Q58 50 71 66 Z"></path>',
     ]
@@ -464,12 +464,12 @@ def _hero_art() -> str:
         for index, level in enumerate(ART_GENES)
     ]
     parts += [
-        _art_text(58, 246, "thousands of genes", "pm-art-c"),
-        _art_arrow(78, 120, 150),
-        '<rect class="pm-art-box" x="122" y="112" width="96" height="76" rx="14"></rect>',
+        _art_text(58, 246, "gene expression", "pm-art-c"),
+        _art_arrow(78, 112, 150),
+        '<rect class="pm-art-box" x="114" y="112" width="96" height="76" rx="14"></rect>',
     ]
     nodes = [
-        [(170 + (k - (count - 1) / 2) * 16, y) for k in range(count)]
+        [(162 + (k - (count - 1) / 2) * 16, y) for k in range(count)]
         for count, y in ART_LAYERS
     ]
     parts += [
@@ -484,32 +484,31 @@ def _hero_art() -> str:
         for x, y in layer
     ]
     parts += [
-        _art_text(170, 204, "omics foundation model", "pm-art-c"),
-        _art_arrow(220, 238, 150),
+        _art_text(162, 204, "omics foundation model", "pm-art-c"),
+        _art_arrow(212, 244, 150),
     ]
     parts += [
-        f'<rect class="pm-art-{"a" if index % 2 else "b"}" x="240" y="{100 + index * 17}" '
+        f'<rect class="pm-art-{"a" if index % 2 else "b"}" x="246" y="{100 + index * 17}" '
         f'width="16" height="14" rx="2" opacity="{level}"></rect>'
         for index, level in enumerate(ART_EMBEDDING)
     ]
     parts += [
-        _art_text(248, 218, "one vector", "pm-art-c"),
-        _art_text(248, 230, "per patient", "pm-art-c"),
+        _art_text(254, 218, "sample", "pm-art-c"),
+        _art_text(254, 230, "representation", "pm-art-c"),
     ]
     for index, task in enumerate(ART_TASKS):
         y = 74 + index * 44
         parts += [
-            f'<path class="pm-art-line" d="M262 150 C 274 150, 274 {y}, 284 {y}"></path>',
-            f'<rect class="pm-art-pill" x="286" y="{y - 14}" width="126" height="28" '
+            f'<path class="pm-art-line" d="M268 150 C 278 150, 278 {y}, 288 {y}"></path>',
+            f'<rect class="pm-art-pill" x="290" y="{y - 14}" width="122" height="28" '
             'rx="14"></rect>',
-            _art_text(298, y + 4, task, "pm-art-t", anchor="start"),
+            _art_text(302, y + 4, task, "pm-art-t", anchor="start"),
         ]
-    parts.append(_art_text(348, 246, "same fixed probe for every model", "pm-art-c"))
     return (
         '<div class="pm-art"><svg class="pm-hero-art" viewBox="0 0 420 268" '
         'role="img" aria-labelledby="pm-art-title"><title id="pm-art-title">A patient\'s '
         "omics profile goes through your model, which returns one embedding per "
-        "patient. The same fixed probe then scores that embedding on clinical tasks."
+        "sample. The same fixed probe then scores that embedding on clinical tasks."
         f"</title>{''.join(parts)}</svg></div>"
     )
 

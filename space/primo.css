@@ -116,7 +116,7 @@ footer { display: none !important; }
 #pm-site .pm-stats li { margin: 0; font: 500 14px/1 var(--pm-f-mono); color: var(--pm-ink-2); border: 1px solid var(--pm-line); background: var(--pm-surface); padding: 8px 12px; border-radius: 999px; }
 #pm-site .pm-stats li::marker { content: none; }
 .pm-stats b { color: var(--pm-ink); font-weight: 600; }
-.pm-art-wrap { justify-self: end; width: 100%; max-width: 480px; }
+.pm-art-wrap { justify-self: end; width: 100%; max-width: 520px; }
 .pm-art { padding: 14px; border: 1px solid var(--pm-line); border-radius: 14px; background: var(--pm-surface); }
 .pm-hero-art { display: block; width: 100%; height: auto; }
 .pm-hero-art text { font-family: var(--pm-f-body); }
