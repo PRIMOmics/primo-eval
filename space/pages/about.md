@@ -55,6 +55,24 @@ which re-ranks the board and refits Elo without them.
 Elo orders the rows. Each task family keeps its own column, in its own metric,
 and no column averages across metrics.
 
+**Elo** is pinned to our HVG-1200 log-normalized linear baseline, which sits at
+exactly 1000. It turns every paired repeat into a win, draw, or loss and
+discards the score margin, so a tiny win counts like a large one. A difference
+of only a few Elo points is effectively a tie, not evidence that one
+representation is meaningfully superior. Use mean rank, the family columns, and
+per-task scores to interpret close rows. +400 Elo is a 10-to-1 expected win
+rate. The scale does not move when a new model is submitted, so ratings stay
+comparable over time, but only within one board, since each board is fitted on
+its own tasks.
+
+**Subm.** (submissions count) is the most times any *single* task result of
+that model was resubmitted, not how many files were uploaded. A model that
+covered twenty tasks across twenty submissions reads 1, because each task was
+submitted once; a model that sent the same task five times reads 5. It shows
+n/a for our baselines and the `+ HVG` rows, which we republish ourselves. A
+published result can be corrected, so a 2 or 3 is ordinary; a high number on
+one task is worth a second look.
+
 ## How the results are organised
 
 A **board** is a self-contained leaderboard over a slice of the benchmark: the
