@@ -38,7 +38,7 @@ areas PRIMO does not reach yet. Any other one is welcome too. Read them as gaps
 waiting for someone rather than as a roadmap we are already working through. Opening one takes a single cohort with clinical
 labels, and not a whole atlas.
 
-[Claim an open board](mailto:karim.elkanbi@scientalab.com?subject=PRIMO%20open%20board&body=Board%20I%20want%20to%20open%3A%0A%0AWhat%20I%20can%20bring%20%28cohort%2C%20labels%2C%20licence%29%3A%0A)
+[Propose a modality or an area](mailto:karim.elkanbi@scientalab.com?subject=PRIMO%20modality%20or%20area%20proposal&body=Modality%20or%20area%20I%20would%20add%3A%0A%0AWhat%20I%20can%20bring%20%28cohort%2C%20labels%2C%20licence%29%3A%0A)
 
 ## Become a founding partner
 
