@@ -177,6 +177,13 @@ def _model_cell_html(cell: ModelCell) -> str:
     )
 
 
+def _with_baseline_chip(name: str) -> str:
+    """The escaped name, its ``(baseline)`` tag shown as the Baseline chip."""
+    if not name.endswith(f" {BASELINE_TAG}"):
+        return escape(name)
+    return f"{escape(name.removesuffix(f' {BASELINE_TAG}'))} {BASELINE_CHIP}"
+
+
 def _score_columns(df: pd.DataFrame) -> list[str]:
     """Numeric columns to format and bold -- ``Rank`` is an index, not a score."""
     return [c for c in df.select_dtypes("number").columns if c not in RIGHT_COLUMNS]
@@ -277,11 +284,7 @@ def _df_to_table(
 
     head = []
     for index, col in enumerate(df.columns):
-        name = escape(str(col))
-        if str(col).endswith(f" {BASELINE_TAG}"):
-            name = (
-                f"{escape(str(col).removesuffix(f' {BASELINE_TAG}'))} {BASELINE_CHIP}"
-            )
+        name = _with_baseline_chip(str(col))
         align = (
             ' style="text-align:right"'
             if col in score_cols or col in RIGHT_COLUMNS
@@ -308,6 +311,8 @@ def _df_to_table(
                 if isinstance(row[col], ModelCell)
                 else "n/a"
                 if text is None
+                else _with_baseline_chip(text)
+                if col in NAME_COLUMNS
                 else escape(text)
             )
             standard_deviation = repeat_sd.get((idx, col))

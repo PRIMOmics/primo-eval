@@ -258,6 +258,18 @@ def test_a_baseline_reads_the_same_in_both_tables(registry, flagged_results):
     assert "pca-50 (baseline)</th>" not in html
 
 
+def test_a_baseline_that_leads_a_task_shows_its_chip_in_best(registry, flagged_results):
+    df = flagged_results(
+        *[("pca-50", tid, 0.9, "2026-01-01", True) for tid in registry],
+        *[("eva", tid, 0.8, "2026-01-01", False) for tid in registry],
+    )
+
+    per_task = _per_task(_view(registry, df))
+
+    assert f'<td class="pm-name">pca-50 {render.BASELINE_CHIP}</td>' in per_task
+    assert "pca-50 (baseline)</td>" not in per_task
+
+
 # --------------------------------------------------------- the toggle pills
 def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(registry, flagged_results):
     df = flagged_results(
