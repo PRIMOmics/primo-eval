@@ -1,6 +1,6 @@
 [project]
 name = "primomics"
-version = "0.1.1"
+version = "0.1.2.dev0"
 description = "Evaluation harness, task specs and baselines for the PRIMO benchmark"
 readme = "README.md"
 license = "Apache-2.0"
@@ -15,7 +15,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "pyyaml",
-    "scikit-learn>=1.7,<1.10",
+    "scikit-learn>=1.9,<1.10",
     "scipy",
 ]
 
@@ -28,6 +28,9 @@ dev = ["pytest", "ruff"]
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src/primomics", "README.md", "LICENSE"]
 
 [tool.ruff.lint]
 extend-select = ["I"]

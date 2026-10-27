@@ -1,8 +1,9 @@
 """The ``primo`` command line.
 
-``primo download`` fetches the datasets of one modality from the Hub, with the
-labels of its public tasks. ``primo evaluate`` checks a submission file against
-that data, then scores the public tasks it covers with the leaderboard protocol.
+``primo download`` fetches the datasets of one modality from the Hub, at the
+commit that the leaderboard scores, with the labels of its public tasks.
+``primo evaluate`` checks a submission file against that data, then scores the
+public tasks it covers with the leaderboard protocol.
 ``primo submit`` checks the file the same way, then sends it to the leaderboard
 Space, which scores every task. Exit codes: 0 when the command succeeds, 1 when
 the input must be fixed (``SubmissionError``), 2 when the failure is on our side
@@ -24,6 +25,7 @@ from huggingface_hub import get_token
 from primomics import __version__
 from primomics.data import (
     DATA_REPO,
+    DATA_REVISION,
     DEFAULT_DATA_DIR,
     OK,
     Download,
@@ -45,7 +47,7 @@ from primomics.evaluate import (
     score_all,
 )
 from primomics.submission import DATASET_ID, norm_id
-from primomics.submit import PUBLISHED, REFUSED, SPACE, submit
+from primomics.submit import MAX_FILE_BYTES, PUBLISHED, REFUSED, SPACE, submit
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,7 @@ def _download(args: argparse.Namespace) -> None:
         tasks=load_tasks_registry(PUBLIC_TASKS),
         public_only=args.public_only,
         dataset_ids=_ids(args.datasets),
+        revision=args.revision,
     )
     _log_download(result, args.data_dir)
 
@@ -261,6 +264,12 @@ def _evaluate(args: argparse.Namespace) -> None:
 def _submit(args: argparse.Namespace) -> None:
     """Run ``primo submit``."""
     verdicts, manifest = _checked(args)
+    size = Path(args.submission).stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise SubmissionError(
+            f"the file weighs {_size(size)}, and the Space takes "
+            f"{_size(MAX_FILE_BYTES)} at most"
+        )
     in_file = [entry for entry in manifest if norm_id(entry["id"]) in verdicts]
     changed = changed_datasets(args.data_dir, in_file)
     if changed:
@@ -319,8 +328,8 @@ def _parser() -> argparse.ArgumentParser:
         "download",
         help="download the datasets of one modality",
         description=(
-            "Download the latest datasets of one modality from the Hub, with the "
-            "labels of its public tasks."
+            "Download the datasets of one modality from the Hub, at the commit "
+            "that the leaderboard scores, with the labels of its public tasks."
         ),
     )
     fetch.add_argument("--modality", required=True, choices=sorted(MODALITIES))
@@ -330,6 +339,14 @@ def _parser() -> argparse.ArgumentParser:
         help="only the datasets that carry a public task",
     )
     fetch.add_argument("--datasets", help="comma-separated dataset ids")
+    fetch.add_argument(
+        "--revision",
+        default=DATA_REVISION,
+        help=(
+            "the Hub commit to download (default: the one the leaderboard "
+            "scores); maintainers use main for the newest data"
+        ),
+    )
     _add_data_dir(fetch, "put")
     fetch.set_defaults(run=_download)
 

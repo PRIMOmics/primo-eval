@@ -1,10 +1,12 @@
 """The public benchmark data: download it from the Hub and read it locally.
 
 Every dataset is one ``expression.h5ad`` listed in ``datasets.yaml``. The public
-tasks also ship their labels under ``public_tasks/``. A download always takes the
-latest commit, and records a hash per file in ``primo-lock.json``, so a score can
-always be traced back to the exact files it was computed on. A submission file is
-checked against the local copy before anything is scored or sent.
+tasks also ship their labels under ``public_tasks/``. A download takes
+``DATA_REVISION``, the data commit of the board version that this release scores,
+so a local score reads the same files as the leaderboard. It records a hash per
+file in ``primo-lock.json``, so a score can always be traced back to the exact
+files it was computed on. A submission file is checked against the local copy
+before anything is scored or sent.
 """
 
 import json
@@ -40,6 +42,7 @@ from primomics.submission import (
 )
 
 DATA_REPO = "PRIMOmics/primo"
+DATA_REVISION = "0f452b2fc84e544fb1a1fc5bd42017482e07b43c"
 REPO_TYPE = "dataset"
 DATASETS_MANIFEST = "datasets.yaml"
 CARD_FILES = ("README.md", "ATTRIBUTION.md")
@@ -222,8 +225,9 @@ def download(
     tasks: list[dict],
     public_only: bool = False,
     dataset_ids: list[str] | None = None,
+    revision: str = DATA_REVISION,
 ) -> Download:
-    """Fetch the latest datasets of one modality, and the labels of its public tasks.
+    """Fetch the datasets of one modality at ``revision``, and their public labels.
 
     ``tasks`` are the public tasks; a public task whose label files are not on the
     Hub is reported in ``unlabelled`` rather than failing the download.
@@ -232,7 +236,7 @@ def download(
     data_dir.mkdir(parents=True, exist_ok=True)
     api = HfApi()
     with _hub_errors():
-        revision = api.dataset_info(DATA_REPO).sha
+        revision = api.dataset_info(DATA_REPO, revision=revision).sha
         manifest_path = hf_hub_download(
             DATA_REPO,
             DATASETS_MANIFEST,
@@ -402,20 +406,23 @@ def locked_files(
     }
 
 
-def changed_datasets(data_dir: str | Path, datasets: list[dict]) -> list[str]:
-    """The datasets whose ``expression.h5ad`` is not the one on the Hub today.
+def changed_datasets(
+    data_dir: str | Path, datasets: list[dict], revision: str = DATA_REVISION
+) -> list[str]:
+    """The datasets whose ``expression.h5ad`` is not the one of ``revision``.
 
     A dataset missing from the lock counts as changed: nothing proves its file is
-    the latest one.
+    that one.
     """
     files = read_lock(data_dir).get("files", {})
     paths = [entry["path"] for entry in datasets]
     with _hub_errors():
-        latest = {
-            file.path: _file_hash(file) for file in _repo_files(HfApi(), None, paths)
+        expected = {
+            file.path: _file_hash(file)
+            for file in _repo_files(HfApi(), revision, paths)
         }
     return [
         norm_id(entry["id"])
         for entry in datasets
-        if files.get(entry["path"], {}).get("hash") != latest.get(entry["path"])
+        if files.get(entry["path"], {}).get("hash") != expected.get(entry["path"])
     ]

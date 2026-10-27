@@ -1,16 +1,17 @@
 """Produce a valid PRIMO submission in one command, then swap in your own model.
 
-Downloads one modality's public datasets and writes the file the Submit tab
-expects. The embedding here is deliberately dumb: bulk data uses
-log2(CPM+1); single-cell data uses per-cell log2(CP10K+1), mean pooling by
-collection sample, then PCA. Replace ``embed`` with your encoder and nothing else
-changes.
+Downloads one modality's public datasets, at the data commit that the
+leaderboard scores, and writes the file the Submit tab expects. The embedding
+here is deliberately dumb: bulk data uses log2(CPM+1); single-cell data uses
+per-cell log2(CP10K+1), mean pooling by collection sample, then PCA. Replace
+``embed`` with your encoder and nothing else changes.
 
     pip install anndata scikit-learn pandas pyarrow pyyaml huggingface_hub
     python quickstart.py --modality bulk-rna --out submission.parquet
 
 Standalone on purpose: no import from this Space, so it keeps working if you
-copy the file into your own project.
+copy the file into your own project. For the same reason, ``DATA_REVISION``
+repeats the data commit of ``versions.yaml``.
 """
 
 import argparse
@@ -24,6 +25,7 @@ from huggingface_hub import hf_hub_download, snapshot_download
 from sklearn.decomposition import PCA
 
 PUBLIC_REPO = "PRIMOmics/primo"
+DATA_REVISION = "0f452b2fc84e544fb1a1fc5bd42017482e07b43c"
 MANIFEST_FILENAME = "datasets.yaml"
 MODALITIES = {"bulk-rna": "bulk RNA", "single-cell-rna": "Single Cell RNA"}
 
@@ -85,7 +87,11 @@ def download(modality: str, token: str | None) -> Path:
     """Download the manifest and expression files for one modality."""
     manifest = Path(
         hf_hub_download(
-            PUBLIC_REPO, MANIFEST_FILENAME, repo_type="dataset", token=token
+            PUBLIC_REPO,
+            MANIFEST_FILENAME,
+            repo_type="dataset",
+            token=token,
+            revision=DATA_REVISION,
         )
     )
     paths = [
@@ -94,7 +100,11 @@ def download(modality: str, token: str | None) -> Path:
     ]
     return Path(
         snapshot_download(
-            PUBLIC_REPO, repo_type="dataset", token=token, allow_patterns=paths
+            PUBLIC_REPO,
+            repo_type="dataset",
+            token=token,
+            revision=DATA_REVISION,
+            allow_patterns=paths,
         )
     )
 

@@ -104,13 +104,16 @@ A release that changes scores also opens a board version:
    with the commits of the data, the labels and the HVG features it reads, and set
    `current` to it. Its `notes` say in one line what changed: the leaderboard shows
    them to every visitor. When the data changes, build the HVG features from it
-   first, after a `primo download` of every modality:
+   first, after a `primo download --revision main` of every modality:
 
    ```bash
    HF_TOKEN=... uv run python scripts/baselines.py --out-dir baselines --publish
    ```
 
    It uploads the features and logs the data and reference commits to pin.
+   Set `DATA_REVISION` in `src/primomics/data.py` and `space/quickstart.py` to
+   the data commit of the new version: tests check that both match
+   `space/versions.yaml`.
 2. After the merge, tag the release as above. Also tag the commits of step 1 `v0.2`
    on the three Hub dataset repos.
 3. From the tag, score the live entries of the previous version again from their
@@ -130,9 +133,9 @@ A release that changes scores also opens a board version:
 5. Run step 3 again: it adds the submissions made before the deploy.
 
 Step 1 pins the commit of the new data, so the data is on the Hub before the
-release PR. Deploy soon after it: until the deploy, the quickstart and
-`primo download` already read the new data, and the live Space refuses a file with
-a dataset that its version does not list.
+release PR. Deploy soon after it: until the deploy, `primo download` of the release
+already reads the new data, and the live Space refuses a file with a dataset that
+its version does not list.
 
 ### Open version 0.1
 

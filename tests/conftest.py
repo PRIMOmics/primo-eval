@@ -68,17 +68,20 @@ CELL_SAMPLES = ["x2", "x2", "x1", "x1", "x1", "x2"]
 
 
 class FakeHub:
-    """Serves ``files`` as the latest commit of the data repo."""
+    """Serves ``files`` at any commit, and records the commit each call asks for."""
 
     def __init__(self, files):
         self.files = files
         self.revision = REVISION
         self.hashes = {}
+        self.requested = []
 
-    def dataset_info(self, repo_id):
+    def dataset_info(self, repo_id, revision=None):
+        self.requested.append(revision)
         return SimpleNamespace(sha=self.revision)
 
     def list_repo_tree(self, repo_id, recursive=False, revision=None, repo_type=None):
+        self.requested.append(revision)
         for path, content in self.files.items():
             lfs = None
             if path.endswith(".h5ad"):

@@ -232,6 +232,10 @@ release steps are in `CONTRIBUTING.md`.
 
 - **`hf_oauth: true`** (set above) turns on the Submit tab's *Sign in with
   Hugging Face* button; submitting requires a logged-in HF account.
+- `primo submit` calls the **`/submit`** endpoint of `submit_api.py`, with the
+  fields of the form and the caller's token. The endpoint reads the token only
+  to learn the account name, and never stores it. The form and the endpoint
+  share the same checks and one queue, so one submission runs at a time.
 - Set an **`HF_TOKEN`** Space secret (fine-grained) with: **read** on
   `PRIMOmics/primo` (the public `datasets.yaml` manifest) and
   `PRIMOmics/primo-labels` (the private `tasks.yaml` registry +
@@ -256,7 +260,8 @@ release steps are in `CONTRIBUTING.md`.
   containing the `+ HVG` tag.
 - The boards show a **Submissions count** per model — the most times any one of
   its task results was resubmitted in the board's version — so a task tuned
-  against by repeated resubmission is visible. Nothing is ever blocked.
+  against by repeated resubmission is visible. An account can publish 4
+  submissions in 24 hours, and a file can weigh 500 MB at most.
 - Submitter contact metadata (HF username, email, paper / model links, notes)
   persists to a separate `submissions.csv` in the same **private** results
   dataset, and never reaches the public leaderboard.

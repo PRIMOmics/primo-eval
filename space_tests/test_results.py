@@ -1,5 +1,6 @@
 """Unit tests for the results schema (no network, no Gradio)."""
 
+import io
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,8 @@ import huggingface_hub
 import numpy as np
 import pandas as pd
 import pytest
+from evaluator import EvaluatorError
+from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
 from results import (
     INSTITUTION,
     IS_AUTHOR_SUBMISSION,
@@ -14,10 +17,15 @@ from results import (
     OWNER,
     PAPER_LINK,
     RESULT_COLUMNS,
+    RESULTS_FILE,
     SUBMISSION_COLUMNS,
     SUBMISSION_ID,
+    SUBMISSIONS_FILE,
     VERSION,
+    WRITE_ATTEMPTS,
     _embedding_manifest,
+    append_results,
+    append_submission,
     archive_paths,
     archive_submission,
     display_name,
@@ -272,3 +280,121 @@ def test_a_submission_is_archived_where_the_rescore_reads_it(tmp_path, monkeypat
         "models/s1/manifest.json",
     )
     assert archive_paths("s1", "")[0] == "models/s1/submission.bin"
+
+
+def _response(status_code: int) -> SimpleNamespace:
+    return SimpleNamespace(status_code=status_code, headers={}, request=None)
+
+
+class FakeResultsRepo:
+    """The private results dataset: the files of each commit, oldest first."""
+
+    def __init__(self, folder: Path):
+        self.folder = folder
+        self.commits = [{}]
+        self.uploads = 0
+
+    def __call__(self, token=None):
+        return self
+
+    @property
+    def head(self) -> str:
+        return f"{len(self.commits) - 1:040x}"
+
+    def create_repo(self, repo_id, **kwargs):
+        pass
+
+    def dataset_info(self, repo_id):
+        return SimpleNamespace(sha=self.head)
+
+    def upload_file(self, *, path_or_fileobj, path_in_repo, parent_commit=None, **kw):
+        self.uploads += 1
+        if parent_commit not in (None, self.head):
+            raise HfHubHTTPError("the branch moved", response=_response(412))
+        self.commits.append({**self.commits[-1], path_in_repo: path_or_fileobj.read()})
+
+    def download(self, repo_id, filename, revision=None, **kwargs):
+        revision = revision or self.head
+        files = self.commits[int(revision, 16)]
+        if filename not in files:
+            raise EntryNotFoundError(filename)
+        path = self.folder / f"{revision}-{filename}"
+        path.write_bytes(files[filename])
+        return str(path)
+
+    def table(self, filename: str) -> pd.DataFrame:
+        return pd.read_csv(io.BytesIO(self.commits[-1][filename]))
+
+
+@pytest.fixture
+def results_repo(tmp_path, monkeypatch):
+    """Route the Hub calls of ``results`` to a ``FakeResultsRepo``."""
+    repo = FakeResultsRepo(tmp_path)
+    monkeypatch.setattr(huggingface_hub, "HfApi", repo)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", repo.download)
+    return repo
+
+
+APPENDS = {
+    RESULTS_FILE: lambda name: append_results(
+        [{"model_name": name, "task_id": "t901"}], None
+    ),
+    SUBMISSIONS_FILE: lambda name: append_submission({"model_name": name}, None),
+}
+
+
+@pytest.mark.parametrize("filename", [RESULTS_FILE, SUBMISSIONS_FILE])
+def test_two_appends_that_cross_keep_every_row(results_repo, monkeypatch, filename):
+    """The other write lands between the read and the upload of ours."""
+    results_repo.commits = [{filename: b"model_name\nolder\n"}]
+    reads = []
+
+    def read_then_let_another_write_land(*args, **kwargs):
+        path = results_repo.download(*args, **kwargs)
+        reads.append(path)
+        if len(reads) == 1:
+            APPENDS[filename]("other")
+        return path
+
+    monkeypatch.setattr(
+        huggingface_hub, "hf_hub_download", read_then_let_another_write_land
+    )
+
+    APPENDS[filename]("mine")
+
+    assert list(results_repo.table(filename)["model_name"]) == [
+        "older",
+        "other",
+        "mine",
+    ]
+
+
+def test_an_append_stops_when_a_write_lands_before_each_attempt(
+    results_repo, monkeypatch
+):
+    upload = results_repo.upload_file
+
+    def upload_after_another_write(**kwargs):
+        results_repo.commits.append(results_repo.commits[-1])
+        upload(**kwargs)
+
+    monkeypatch.setattr(results_repo, "upload_file", upload_after_another_write)
+
+    with pytest.raises(EvaluatorError, match="rows were not saved"):
+        APPENDS[RESULTS_FILE]("mine")
+
+    assert results_repo.uploads == WRITE_ATTEMPTS
+    assert RESULTS_FILE not in results_repo.commits[-1]
+
+
+def test_an_append_stops_at_once_on_another_hub_error(results_repo, monkeypatch):
+    def refuse(**kwargs):
+        results_repo.uploads += 1
+        raise HfHubHTTPError("unauthorized", response=_response(401))
+
+    monkeypatch.setattr(results_repo, "upload_file", refuse)
+
+    with pytest.raises(HfHubHTTPError, match="unauthorized"):
+        APPENDS[SUBMISSIONS_FILE]("mine")
+
+    assert results_repo.uploads == 1

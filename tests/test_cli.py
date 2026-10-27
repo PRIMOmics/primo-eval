@@ -30,6 +30,21 @@ def test_download_lists_each_dataset_with_its_public_tasks(
     assert any("d902" in line and line.rstrip().endswith("-") for line in lines)
 
 
+@pytest.mark.parametrize(
+    ("options", "asked"),
+    [([], data.DATA_REVISION), (["--revision", "main"], "main")],
+)
+def test_download_reads_the_board_commit_unless_told_otherwise(
+    fake_hub, public_tasks, tmp_path, options, asked
+):
+    code = cli.main(
+        ["download", "--modality", "bulk-rna", "--data-dir", str(tmp_path), *options]
+    )
+
+    assert code == 0
+    assert fake_hub.requested[0] == asked
+
+
 def test_download_parses_comma_separated_datasets(fake_hub, public_tasks, tmp_path):
     code = cli.main(
         [
@@ -382,6 +397,18 @@ def test_submit_stops_on_a_failed_check(
 
     assert code == 1
     assert fake_space.calls == []
+
+
+def test_submit_refuses_a_file_over_the_limit_of_the_space(
+    fake_hub, logged_in, public_tasks, local_data, tmp_path, monkeypatch, caplog
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    monkeypatch.setattr(cli, "MAX_FILE_BYTES", submission.stat().st_size - 1)
+
+    code = _submit(submission, local_data, "--dry-run")
+
+    assert code == 1
+    assert "the Space takes" in caplog.text
 
 
 @pytest.mark.parametrize(("status", "code"), [("refused", 1), ("error", 2)])

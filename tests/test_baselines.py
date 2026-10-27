@@ -355,7 +355,9 @@ def test_publish_stops_when_the_data_changed_on_the_hub(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_test")
     _hub_lists(monkeypatch, "d901")
     monkeypatch.setattr(
-        primomics.data, "changed_datasets", lambda data_dir, entries: ["d901"]
+        primomics.data,
+        "changed_datasets",
+        lambda data_dir, entries, revision: ["d901"],
     )
     uploads = []
     monkeypatch.setattr(
@@ -380,8 +382,11 @@ def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
     rng = np.random.default_rng(0)
     _write_data(tmp_path / "data", {"d901": _adata(rng.poisson(5, size=(4, 3)))})
     monkeypatch.setenv("HF_TOKEN", "hf_test")
+    compared = []
     monkeypatch.setattr(
-        primomics.data, "changed_datasets", lambda data_dir, entries: []
+        primomics.data,
+        "changed_datasets",
+        lambda data_dir, entries, revision: compared.append(revision) or [],
     )
     _hub_lists(monkeypatch, "d901")
     uploads = []
@@ -404,6 +409,7 @@ def test_publish_uploads_only_the_reference_and_logs_the_commits_to_pin(
             "--publish",
         )
 
+    assert compared == ["data123"]
     assert uploads == [tmp_path / "out" / "submission_HVG-1200-genes.parquet"]
     assert "data data123, reference ref456" in caplog.text
 

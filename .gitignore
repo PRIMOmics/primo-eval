@@ -151,6 +151,7 @@ activemq-data/
 
 # Environments
 .env
+.env.*
 .envrc
 .venv
 env/
@@ -228,3 +229,7 @@ CLAUDE.local.md
 
 # Benchmark data from primo download
 primo-data/
+
+# Checkpoints and rows written by space/rescore.py
+ckpt/
+rows.csv

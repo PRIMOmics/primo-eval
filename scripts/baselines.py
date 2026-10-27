@@ -29,8 +29,8 @@ repo with ``--labels-dir``.
 the ``+ HVG`` reference, then logs the data and reference commits to pin in
 ``space/versions.yaml``. The version rescore scores the ``HVG-1200-genes``
 baseline and every ``+ HVG`` entry from them. The features must be built from
-the data on the Hub, so ``--publish`` stops when a dataset changed since
-``primo download``:
+the newest data on the Hub, which ``primo download --revision main`` fetches,
+so ``--publish`` stops when a dataset changed since that download:
 
     uv run python scripts/baselines.py --data-dir primo-data --out-dir baselines \\
         --publish
@@ -279,13 +279,15 @@ def check_data_is_current(data_dir: Path) -> str:
         raise SystemExit(
             "--publish needs the datasets that the Hub lists. Missing from the "
             f"download: {sorted(listed - downloaded)}; no longer on the Hub: "
-            f"{sorted(downloaded - listed)}. Run primo download, then publish again."
+            f"{sorted(downloaded - listed)}. Run primo download --revision main, then "
+            "publish again."
         )
-    changed = changed_datasets(data_dir, entries)
+    changed = changed_datasets(data_dir, entries, commit)
     if changed:
         raise SystemExit(
             f"--publish needs the data of the Hub, and these datasets changed since "
-            f"primo download: {changed}. Run primo download, then publish again."
+            f"primo download: {changed}. Run primo download --revision main, then "
+            "publish again."
         )
     return commit
 

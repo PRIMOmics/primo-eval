@@ -8,6 +8,7 @@ They are passed by name, so a renamed or missing input raises an error instead o
 filling the wrong field. The Space reads the token only to learn who submits, so a
 model name stays with the account that first used it. It replies with a ``status``
 (``published``, ``refused`` or ``error``), a ``message`` and a ``submission_id``.
+The Space takes a file of ``MAX_FILE_BYTES`` at most.
 """
 
 from pathlib import Path
@@ -21,6 +22,7 @@ SUBMIT_API = "/submit"
 PUBLISHED = "published"
 REFUSED = "refused"
 REPLY_KEYS = ("status", "message", "submission_id")
+MAX_FILE_BYTES = 500_000_000
 
 
 def submit(
