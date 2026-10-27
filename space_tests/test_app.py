@@ -122,6 +122,10 @@ def test_a_column_sort_marks_the_table_so_the_top_three_frame_hides():
     assert "table.dataset.sorted" in app.TABLE_SORT_JS
 
 
+def test_the_cite_button_opens_its_window():
+    assert 'querySelector("#pm-cite-dialog")?.showModal()' in app.TABLE_SORT_JS
+
+
 def test_owned_model_name_does_not_reveal_owner(monkeypatch):
     monkeypatch.setattr(app, "_results_frame", lambda: _ledger())
     monkeypatch.setattr(app, "_claimed_by", lambda df, model: "private-owner")

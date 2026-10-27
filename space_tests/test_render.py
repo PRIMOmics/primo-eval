@@ -552,13 +552,22 @@ def test_a_rank_citation_skips_the_date_of_a_board_without_results(results):
     assert f"PRIMO leaderboard v{CURRENT.number}, {SPACE_URL}" in html
 
 
-def test_the_citation_names_the_version_on_screen(boards, registry, results):
-    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+def test_the_cite_window_names_the_version_on_screen(monkeypatch):
+    monkeypatch.setattr(render, "VERSIONS", [CURRENT, CLOSED])
 
-    html = render_view(boards[0], df, registry, "Bulk RNAseq", True, CLOSED)
+    html = nav_html("tasks", CLOSED)
 
     assert f"note         = {{Leaderboard version {CLOSED.number}}}" in html
     assert f"PRIMO leaderboard v{CLOSED.number}</code>" in html
+
+
+def test_the_cite_button_is_in_the_top_bar_not_under_the_ranking(registry, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+
+    nav = nav_html("tasks")
+
+    assert 'id="pm-cite-btn"' in nav and 'id="pm-cite-dialog"' in nav
+    assert "Evaluating a model on PRIMO" not in _view(registry, df)
 
 
 def test_a_version_that_closed_the_day_it_opened_says_so(monkeypatch):

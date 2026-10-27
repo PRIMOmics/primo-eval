@@ -238,15 +238,10 @@ footer { display: none !important; }
 #pm-site .pm-note { margin: 12px 0 0; font-size: 13px; color: var(--pm-ink-3); max-width: 64em; }
 #pm-site .pm-empty { margin: 0; padding: 22px 18px; font-size: 15px; color: var(--pm-ink-2); }
 
-/* how to cite PRIMO, under the ranking */
-#pm-site .pm-cite { margin: 18px 0 0; padding: 14px 18px; border: 1px solid var(--pm-line); border-left: 3px solid var(--pm-mark); border-radius: 12px; background: var(--pm-surface); }
-#pm-site .pm-cite p { margin: 0; font-size: 15px; color: var(--pm-ink-2); }
-#pm-site .pm-cite b { color: var(--pm-ink); }
-#pm-site .pm-cite a { color: var(--pm-ink); text-decoration: underline; text-underline-offset: 3px; }
-#pm-site .pm-cite details { margin-top: 10px; }
-#pm-site .pm-cite summary { display: inline-flex; align-items: center; min-height: 30px; padding: 6px 12px; border: 1px solid var(--pm-line); border-radius: 999px; background: var(--pm-bg); cursor: pointer; list-style: none; font: 500 12.5px/1 var(--pm-f-mono); color: var(--pm-ink); }
-#pm-site .pm-cite summary::-webkit-details-marker { display: none; }
-#pm-site .pm-cite pre { margin: 10px 0 0; overflow-x: auto; font-size: 12.5px; white-space: pre; }
+/* the window of the Cite button, in the top bar */
+#pm-cite-dialog { width: min(640px, calc(100vw - 32px)); margin: auto !important; }
+#pm-cite-dialog b { color: var(--pm-ink); }
+#pm-cite-dialog pre { margin: 14px 0 0; overflow-x: auto; font: 12.5px/1.55 var(--pm-f-mono); white-space: pre; }
 
 /* the per-task scores, folded under the ranking */
 #pm-site .pm-more { margin-top: 36px; }

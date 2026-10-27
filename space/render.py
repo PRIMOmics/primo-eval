@@ -555,11 +555,36 @@ def version_notice(version: Version) -> str:
     )
 
 
-def nav_html(active_tab: str, version: Version = CURRENT) -> str:
-    """The top bar: the PRIMO mark, the pages, the data, the paper and Submit.
+def _cite_dialog(version: Version) -> str:
+    """The window of the Cite button: how to cite PRIMO and the version on screen."""
+    bibtex = (
+        "@misc{primo2026,\n"
+        "  title        = {{PRIMO}: Patient Representations in Multi-Omics},\n"
+        "  author       = {{PRIMO contributors}},\n"
+        "  year         = {2026},\n"
+        f"  note         = {{Leaderboard version {version.number}}},\n"
+        f"  howpublished = {{\\url{{{SPACE_URL}}}}}\n"
+        "}"
+    )
+    return (
+        '<dialog id="pm-cite-dialog" class="pm-dialog" aria-labelledby="pm-cite-title">'
+        '<form method="dialog" class="pm-dialog-surface">'
+        '<h2 id="pm-cite-title">Cite PRIMO</h2>'
+        "<p><b>Evaluating a model on PRIMO?</b> Please cite PRIMO and give the board "
+        "version you used, for example "
+        f"<code>PRIMO leaderboard v{escape(version.number)}</code>.</p>"
+        f"<pre>{escape(bibtex)}</pre>"
+        '<div class="pm-dialog-actions">'
+        '<button class="pm-btn pm-btn--outline" value="close">Close</button>'
+        "</div></form></dialog>"
+    )
 
-    On a closed version, every page link keeps it, except Submit, and a banner
-    under the bar says the version is closed.
+
+def nav_html(active_tab: str, version: Version = CURRENT) -> str:
+    """The top bar: the PRIMO mark, the pages, the data, the paper, Submit and Cite.
+
+    On a closed version, every page link keeps it, except Submit, Cite names it,
+    and a banner under the bar says the version is closed.
     """
     links = [
         f'<a class="{"pm-active" if tab == active_tab else ""}" target="_self" '
@@ -578,7 +603,9 @@ def nav_html(active_tab: str, version: Version = CURRENT) -> str:
         '<div class="pm-nav-right">'
         f'<nav class="pm-nav-links" aria-label="Main">{"".join(links)}</nav>'
         '<a class="pm-btn" target="_self" href="?tab=submit">Submit a model</a>'
-        f"</div></header>{version_notice(version)}"
+        '<button type="button" class="pm-btn pm-btn--outline" id="pm-cite-btn" '
+        'aria-haspopup="dialog" aria-controls="pm-cite-dialog">Cite</button>'
+        f"</div></header>{_cite_dialog(version)}{version_notice(version)}"
     )
 
 
@@ -754,33 +781,12 @@ def _per_task_details(per_task: pd.DataFrame, by_id: dict, board: Board) -> str:
     )
 
 
-def _cite_html(version: Version) -> str:
-    """How to cite PRIMO, with the board version on screen."""
-    bibtex = (
-        "@misc{primo2026,\n"
-        "  title        = {{PRIMO}: Patient Representations in Multi-Omics},\n"
-        "  author       = {{PRIMO contributors}},\n"
-        "  year         = {2026},\n"
-        f"  note         = {{Leaderboard version {version.number}}},\n"
-        f"  howpublished = {{\\url{{{SPACE_URL}}}}}\n"
-        "}"
-    )
-    return (
-        '<div class="pm-cite" id="pm-cite"><p><b>Evaluating a model on PRIMO?</b> '
-        "Please cite PRIMO and give the board version you used, for example "
-        f"<code>PRIMO leaderboard v{escape(version.number)}</code>.</p>"
-        "<details><summary>BibTeX</summary>"
-        f"<pre>{escape(bibtex)}</pre></details></div>"
-    )
-
-
 def render_view(
     board: Board,
     df: pd.DataFrame,
     by_id: dict[str, dict],
     view_name: str,
     show_hvg: bool,
-    version: Version = CURRENT,
 ) -> str:
     """One view: its size, its ranking, then its per-task scores."""
     rows = df if show_hvg else without_hvg(df)
@@ -799,7 +805,6 @@ def render_view(
     return (
         f'<div class="pm-card">{head}{ranked}</div>'
         + RANKED_NOTE
-        + _cite_html(version)
         + _per_task_details(per_task_table(rows, by_id, board), by_id, board)
     )
 

@@ -215,6 +215,10 @@ TABLE_SORT_JS = """
     if (header) sort(header);
   });
   document.addEventListener("click", (event) => {
+    if (!event.target.closest("#pm-cite-btn")) return;
+    document.querySelector("#pm-cite-dialog")?.showModal();
+  });
+  document.addEventListener("click", (event) => {
     const evaluateButton = event.target.closest(
       "#pm-evaluate button, button#pm-evaluate"
     );
@@ -569,12 +573,12 @@ def _render_view(
     """
     if state is None:
         return gr.skip()
-    by_id, _, df, version = state
+    by_id, _, df, _ = state
     board = view_board(by_id, modality, area, category)
     if public == HIDE:
         board = without_public(board, by_id)
     name = _view_name(by_id, modality, area, category)
-    return render_view(board, df, by_id, name, hvg != HIDE, version)
+    return render_view(board, df, by_id, name, hvg != HIDE)
 
 
 def _on_modality(state: PageState, modality: str, hvg: str, public: str):
