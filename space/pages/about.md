@@ -49,19 +49,35 @@ embedding concatenated with the `HVG-1200-genes` features of each sample. The
 embedding is scaled to unit length, the 1,200 log-normalized genes are appended,
 and the concatenated row is scaled to unit length again before the same probe.
 It shows whether a model adds information that expression alone does not carry.
-These rows are shown by default; untick **Include models + HVG** on a board to
-hide them, which re-ranks the board and refits Elo without them.
+These rows are shown by default; set **+ HVG models** to **Hide** to hide them,
+which re-ranks the board and refits Elo without them.
 
-Every board also shows a **Mean score**: the average of the model's scores on
-the tasks of the board. Elo orders the rows, not this mean. When a board holds
-more than one metric, this mean mixes them, so do the real comparison on the
-family columns.
+Elo orders the rows. Each task family keeps its own column, in its own metric,
+and no column averages across metrics.
+
+**Elo** is pinned to our HVG-1200 log-normalized linear baseline, which sits at
+exactly 1000. It turns every paired repeat into a win, draw, or loss and
+discards the score margin, so a tiny win counts like a large one. A difference
+of only a few Elo points is effectively a tie, not evidence that one
+representation is meaningfully superior. Use mean rank, the family columns, and
+per-task scores to interpret close rows. +400 Elo is a 10-to-1 expected win
+rate. The scale does not move when a new model is submitted, so ratings stay
+comparable over time, but only within one board, since each board is fitted on
+its own tasks.
+
+**Subm.** (submissions count) is the most times any *single* task result of
+that model was resubmitted, not how many files were uploaded. A model that
+covered twenty tasks across twenty submissions reads 1, because each task was
+submitted once; a model that sent the same task five times reads 5. It shows
+n/a for our baselines and the `+ HVG` rows, which we republish ourselves. A
+published result can be corrected, so a 2 or 3 is ordinary; a high number on
+one task is worth a second look.
 
 ## How the results are organised
 
 A **board** is a self-contained leaderboard over a slice of the benchmark: the
-whole modality, one therapeutic area, or one task family. Pick one from the rail,
-or on the **Boards** page.
+whole modality, one therapeutic area, one task family, or an area and a family
+together. Pick it with the pills of the **Leaderboard** page.
 
 A board ranks only the models that covered **all of its tasks**. Skipping
 Infectious diseases therefore costs you nothing on the Oncology board.
@@ -92,7 +108,8 @@ the archive but never the accession, as publishing the study id behind a
 
 ## Cite PRIMO
 
-Cite the benchmark paper: <https://openreview.net/forum?id=v2SA8gHwqo>
+Cite this website and the board version that you used. The **Cite** button, at
+the top of every page, gives the BibTeX entry.
 
 Want to add a cohort, propose a task on the cohorts already here, open a new
 modality or therapeutic area, or work with us on the methodology? The

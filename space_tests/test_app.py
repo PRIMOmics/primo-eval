@@ -8,8 +8,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
-from boards import build_boards
-from render import render_boards
+from boards import ALL
 from versions import CURRENT
 
 from .conftest import CLOSED, REGISTRY
@@ -21,6 +20,8 @@ gradio_stub.OAuthProfile = object
 gradio_stub.Request = object
 gradio_stub.Blocks = object
 gradio_stub.Tabs = lambda selected: selected
+gradio_stub.Radio = lambda **kwargs: kwargs
+gradio_stub.skip = lambda: "skip"
 sys.modules["gradio"] = gradio_stub
 app = importlib.import_module("app")
 if previous_gradio is None:
@@ -92,9 +93,8 @@ def _evaluate(
     monkeypatch.setattr(app, "append_results", append_results)
     monkeypatch.setattr(app, "archive_submission", lambda *args: {})
     monkeypatch.setattr(app, "append_submission", lambda meta, token: None)
-    monkeypatch.setattr(app, "_rendered_board", lambda slug: "board")
 
-    summary, _ = app.evaluate(
+    return app.evaluate(
         "submission.csv",
         "bulk-rna",
         model,
@@ -104,10 +104,8 @@ def _evaluate(
         "",
         "",
         "",
-        None,
         SimpleNamespace(username="submitter"),
     )
-    return summary
 
 
 def test_successful_submission_confirms_model_is_on_relevant_boards(monkeypatch):
@@ -120,12 +118,19 @@ def test_table_sort_prefers_the_numeric_cell_value_over_sd_display_text():
     assert "cell.dataset.sortValue || cell.textContent.trim()" in app.TABLE_SORT_JS
 
 
+def test_a_column_sort_marks_the_table_so_the_top_three_frame_hides():
+    assert "table.dataset.sorted" in app.TABLE_SORT_JS
+
+
+def test_the_cite_button_opens_its_window():
+    assert 'querySelector("#pm-cite-dialog")?.showModal()' in app.TABLE_SORT_JS
+
+
 def test_owned_model_name_does_not_reveal_owner(monkeypatch):
     monkeypatch.setattr(app, "_results_frame", lambda: _ledger())
     monkeypatch.setattr(app, "_claimed_by", lambda df, model: "private-owner")
-    monkeypatch.setattr(app, "_rendered_board", lambda *args: "board")
 
-    summary, _ = app.evaluate(
+    summary = app.evaluate(
         "submission.csv",
         "bulk-rna",
         "eva-rna-v1",
@@ -135,7 +140,6 @@ def test_owned_model_name_does_not_reveal_owner(monkeypatch):
         "",
         "",
         "",
-        None,
         SimpleNamespace(username="submitter"),
     )
 
@@ -190,32 +194,71 @@ def test_registry_flags_the_public_tasks(monkeypatch):
     assert registry["t902"]["public"] is True
 
 
-def test_overview_renders_from_the_state_init_hands_over(monkeypatch):
-    by_id = {task_id: dict(task) for task_id, task in REGISTRY.items()}
-    boards = build_boards(by_id)
-    df = _ledger(("eva", "alice", "t901"), ("eva", "alice", "t902"))
-    monkeypatch.setattr(
-        app, "_page_state", lambda version: (by_id, boards, df, version)
-    )
-    monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
-
-    state = app._init(None)[3]
-
-    assert app._render_overview(state) == (render_boards(boards, df, by_id), None)
-
-
-def test_only_the_board_page_renders_a_board(monkeypatch, registry, boards):
+def _init(monkeypatch, registry, boards, **query):
     empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
     monkeypatch.setattr(
         app, "_page_state", lambda version: (registry, boards, empty, version)
     )
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
+    return app._init(SimpleNamespace(query_params=query))
 
-    on_tasks = app._init(SimpleNamespace(query_params={"tab": "tasks"}))
-    on_board = app._init(SimpleNamespace(query_params={"board": "bulk-rna"}))
 
-    assert on_tasks[-1] == ""
-    assert "<h1>Bulk RNAseq</h1>" in on_board[-1]
+def test_every_page_lands_on_its_tab_and_renders_the_view(
+    monkeypatch, registry, boards
+):
+    on_tasks = _init(monkeypatch, registry, boards, tab="tasks")
+    on_boards = _init(monkeypatch, registry, boards, tab="boards")
+
+    assert on_tasks[0] == {"selected": "tasks"}
+    assert on_boards[0] == {"selected": "leaderboard"}
+    assert "<b>5</b> tasks" in on_tasks[3]
+
+
+def test_a_view_link_sets_its_pills(monkeypatch, registry, boards):
+    pills = _init(
+        monkeypatch, registry, boards, area="gastroenterology", task="clinical-scores"
+    )[4:7]
+
+    assert [pill["value"] for pill in pills] == [
+        "bulk-rna",
+        "gastroenterology",
+        "clinical-scores",
+    ]
+
+
+def test_an_old_board_link_opens_its_view(monkeypatch, registry, boards):
+    pills = _init(monkeypatch, registry, boards, board="endotype-bulk-rna")[4:7]
+
+    assert [pill["value"] for pill in pills] == ["bulk-rna", ALL, "endotype"]
+
+
+def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
+    pills = _init(monkeypatch, registry, boards, area="nowhere", task="nothing")[4:7]
+
+    assert [pill["value"] for pill in pills] == ["bulk-rna", ALL, ALL]
+
+
+def test_a_pill_clicked_before_the_page_loads_changes_nothing():
+    assert app._render_view(None, "bulk-rna", ALL, ALL, "show", "show") == "skip"
+
+
+def test_the_public_tasks_pill_shows_only_when_a_task_is_public(
+    monkeypatch, registry, boards
+):
+    private = {task_id: {**task, "public": False} for task_id, task in registry.items()}
+
+    shown = _init(monkeypatch, registry, boards)[8]
+    hidden = _init(monkeypatch, private, boards)[8]
+
+    assert shown["visible"] is True
+    assert hidden["visible"] is False
+
+
+def test_the_page_loads_no_stylesheet_from_another_site():
+    css = Path(app.CSS_PATH).read_text()
+
+    assert 'rel="stylesheet"' not in app.PAGE_HEAD
+    assert "@import" not in css
 
 
 def test_submission_also_saves_its_hvg_concatenation_entry(monkeypatch):

@@ -1,18 +1,21 @@
 """Unit tests for board construction (no network, no Gradio)."""
 
 from boards import (
+    ALL,
     AREA_GROUP,
     CATEGORY_GROUP,
     MODALITY_GROUP,
     OPEN_BOARDS,
-    board_label,
+    area_choices,
+    board_view,
     build_boards,
-    by_slug,
-    featured,
+    category_choices,
     in_group,
     metric_label,
+    modality_choices,
     open_in_group,
     short_code,
+    view_board,
     without_public,
 )
 
@@ -91,44 +94,10 @@ def test_a_second_modality_gets_distinct_area_and_category_boards(registry, boar
     assert {b.slug for b in endotype} == {"endotype-bulk-rna", "endotype-single-cell"}
 
 
-def test_area_and_category_labels_name_the_modality(registry):
-    registry["t906"] = {
-        **registry["t905"],
-        "task_id": "t906",
-        "modality": "Single Cell RNA",
-    }
-    labels = {
-        board_label(board)
-        for board in build_boards(registry)
-        if board.group in {AREA_GROUP, CATEGORY_GROUP}
-    }
-
-    assert "Rheumatology - bulk RNAseq" in labels
-    assert "Rheumatology - scRNAseq" in labels
-    assert "Endotype - bulk RNAseq" in labels
-    assert "Endotype - scRNAseq" in labels
-
-
-def test_featured_leads_with_the_modality_board(boards):
-    assert next(b.name for b in featured(boards)) == "Bulk RNAseq"
-    assert len(featured(boards)) == 3
-
-
 def test_slugs_are_unique_and_url_safe(boards):
     slugs = [b.slug for b in boards]
     assert len(set(slugs)) == len(slugs)
     assert all(s.replace("-", "").isalnum() for s in slugs)
-
-
-def test_unknown_slug_falls_back_to_the_hero_board(boards):
-    assert by_slug(boards, "does-not-exist").name == "Bulk RNAseq"
-    assert by_slug(boards, None).name == "Bulk RNAseq"
-    assert by_slug([], "anything") is None
-
-
-def test_slug_round_trips(boards):
-    for board in boards:
-        assert by_slug(boards, board.slug) is board
 
 
 def test_registry_without_areas_degrades_to_modality_boards(registry):
@@ -276,3 +245,69 @@ def test_without_public_empties_a_board_of_public_tasks(named, registry):
     private = without_public(named("Dermatology"), registry)
     assert private.task_ids == frozenset()
     assert (private.n_cohorts, private.n_patients, private.n_diseases) == (0, 0, 0)
+
+
+# ---------------------------------------------------------------- view pills
+def test_a_modality_spelled_twice_gets_one_pill(registry):
+    for task_id, spelling in (("t906", "Single Cell RNA"), ("t907", "single-cell RNA")):
+        registry[task_id] = {
+            **registry["t905"],
+            "task_id": task_id,
+            "modality": spelling,
+        }
+
+    assert modality_choices(registry) == [
+        ("Bulk RNAseq", "bulk-rna"),
+        ("Single-cell RNAseq", "single-cell-rna"),
+    ]
+
+
+def test_area_and_task_pills_start_with_all_and_skip_other(registry):
+    registry["t906"] = {
+        **registry["t901"],
+        "task_id": "t906",
+        "therapeutic_area": "Other",
+    }
+
+    assert area_choices(registry, "bulk-rna") == [
+        ("All", ALL),
+        ("Dermatology", "dermatology"),
+        ("Gastroenterology", "gastroenterology"),
+        ("Rheumatology", "rheumatology"),
+    ]
+    assert category_choices(registry, "bulk-rna") == [
+        ("All", ALL),
+        ("Clinical scores", "clinical-scores"),
+        ("Endotype", "endotype"),
+        ("Treatment outcome", "treatment-outcome"),
+    ]
+
+
+def test_a_view_crosses_an_area_with_a_task_family(registry):
+    crossed = view_board(registry, "bulk-rna", "gastroenterology", "clinical-scores")
+
+    assert crossed.task_ids == {"t902", "t903"}
+    assert view_board(registry, "bulk-rna", ALL, ALL).task_ids == set(registry)
+    assert not view_board(registry, "bulk-rna", "dermatology", "endotype").task_ids
+
+
+def test_a_view_of_one_axis_holds_the_tasks_of_its_board(boards, registry):
+    for board in boards:
+        view = view_board(registry, *board_view(board, registry))
+        assert view.task_ids == board.task_ids
+
+
+def test_an_old_board_link_maps_to_its_pills(boards, registry):
+    by_slug = {board.slug: board for board in boards}
+
+    assert board_view(by_slug["bulk-rna"], registry) == ("bulk-rna", ALL, ALL)
+    assert board_view(by_slug["gastroenterology-bulk-rna"], registry) == (
+        "bulk-rna",
+        "gastroenterology",
+        ALL,
+    )
+    assert board_view(by_slug["endotype-bulk-rna"], registry) == (
+        "bulk-rna",
+        ALL,
+        "endotype",
+    )

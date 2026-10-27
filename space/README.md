@@ -23,16 +23,17 @@ per-category leaderboard. The datasets are opaque (`d002`, `d003`…) and you ne
 see the disease, tissue, or target, which leaves you grading the *embedding*
 itself with no room for per-task tuning.
 
-A left **rail** navigates six pages: **Boards** (a grid of every board),
-**Board** (one leaderboard at a time), **Tasks**, a **Submit** form (sign in with
-Hugging Face), **Contribute**, and **Method**. Every board has its own URL,
-`?board=oncology-bulk-rna`, and every page too, as `?tab=contribute`, so the
-rail links and the open cards are shareable deep links.
+A top bar navigates five pages: **Leaderboard** (one ranking at a time, picked
+with the Modality, Therapeutic area and Task pills), **Tasks**, a **Submit** form
+(sign in with Hugging Face), **Contribute**, and **Method**. Every page has its
+own URL, as `?tab=contribute`, and every view too, as
+`?modality=bulk-rna&area=oncology&task=all`, so both are shareable deep links.
+Old `?board=oncology-bulk-rna` links still open their view.
 
-Boards also shows **open boards**: greyed-out cards for the omics layers and the
-therapeutic areas PRIMO does not cover yet, each linking to Contribute. They are
-declared in `boards.py` (`OPEN_BOARDS`) and drop out on their own once the
-registry covers that slice. Task categories deliberately get none, because a
+The last panel of the leaderboard names the omics layers and the therapeutic
+areas PRIMO does not cover yet, and links to Contribute. They are declared in
+`boards.py` (`OPEN_BOARDS`) and drop out on their own once the registry covers
+that slice. Task categories deliberately get none, because a
 category is pinned to a single metric, so an open one would advertise a probe
 that does not exist.
 
@@ -113,10 +114,8 @@ metric. Two families are never merged into one column:
   Spearman**), where 1 is perfect, 0 is uninformative, and -1 is an inverse gene
   ranking.
 
-A leaderboard shows one column per family. It also shows **Mean score**, the
-average of the model's scores on the tasks of the board. Elo orders the rows,
-not this mean. When a board holds more than one metric, this mean mixes them,
-so compare models on the family columns.
+A leaderboard shows one column per family, in its own metric. Elo orders the
+rows, and no column averages across metrics.
 
 ## Boards
 
@@ -136,10 +135,9 @@ The tasks listed in `public_tasks/manifest.yaml` of the data repo have
 downloadable labels. They are tagged **Public** in the task tables and are
 scored like every other task.
 
-A board that mixes public and private tasks has an **Only private tasks**
-checkbox, below **Include models + HVG**. Ticking it re-ranks the board on its
-private tasks only, without a page reload. It is unticked by default. The home
-page, the rail and the Tasks page always show every task.
+When the version has public tasks, a **Public tasks** pill shows. Set to
+**Hide**, it re-ranks the view on its private tasks only, without a page reload.
+It shows every task by default. The Tasks page always shows every task.
 
 ## Make a submission
 
@@ -202,10 +200,10 @@ with it.
 
 A board version is a minor release of primo-eval: version `0.1` is scored by the
 `v0.1.x` releases. `versions.yaml` lists every version with its release tag, the
-day it opened, and the Hub commits its scores read: `data` in `PRIMOmics/primo`,
-`labels` in `PRIMOmics/primo-labels`, and `reference`, the commit of
-`PRIMOmics/primo-results` that holds the HVG features. `current` is the version
-this code scores.
+day it opened, the Hub commits its scores read, and its `notes`: one line on what
+changed. The commits are `data` in `PRIMOmics/primo`, `labels` in
+`PRIMOmics/primo-labels`, and `reference`, the commit of `PRIMOmics/primo-results`
+that holds the HVG features. `current` is the version this code scores.
 
 The scorer reads these commits, not the latest ones, so a push to a data repo
 changes no score until a release opens a new version. `requirements.txt` pins the
@@ -216,9 +214,10 @@ Each result row records the version that scored it, and a board shows only the
 rows of its version. Rows written before versions existed carry none, so they are
 shown on no board.
 
-A menu under the logo lists the versions and the release notes. `?version=0.1`
-opens a closed version, read-only: its registry at its pinned commits and the rows
-it scored, with a notice that links back to the current version. Every link keeps
+The "Release notes" section, at the bottom of the leaderboard, lists every version
+with its notes and links to the board of each one. `?version=0.1` opens a closed
+version, read-only: its registry at its pinned commits and the rows it scored,
+with a notice under the top bar that links back to the current version. Every link keeps
 the version, except Submit: a submission always goes to the current version.
 
 When a release opens a new version, `rescore.py` fills its board from the archived

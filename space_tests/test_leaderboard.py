@@ -17,7 +17,6 @@ from leaderboard import (
     source_repositories,
     submission_counts,
     tasks_table,
-    top_models,
 )
 
 from .conftest import REGISTRY
@@ -81,11 +80,11 @@ def test_one_column_per_category_in_its_native_metric(registry, named, results):
 
 def test_comparison_columns_are_present_for_every_board(registry, named, results):
     df = results(*_full("full", "2026-01-01"))
-    assert {"Elo", "Mean score", "Mean rank"} <= set(
-        ranked_table(df, registry, named("bulk RNA")).columns
-    )
+    bulk = ranked_table(df, registry, named("bulk RNA"))
     endotype = ranked_table(df, registry, named("Endotype"))
-    assert {"Elo", "Mean score", "Mean rank"} <= set(endotype.columns)
+    for table in (bulk, endotype):
+        assert {"Elo", "Mean rank"} <= set(table.columns)
+        assert "Mean score" not in table.columns
     assert "Endotype (AUROC)" in endotype.columns
 
 
@@ -156,12 +155,6 @@ def test_a_model_scoring_nothing_finite_is_not_ranked(registry, named, results):
     assert list(board["Model"]) == ["bad"]
 
 
-def test_a_card_is_empty_when_no_model_has_a_finite_score(registry, named, results):
-    df = results(*_full("nan-everywhere", "2026-01-01", scores=(float("nan"),) * 5))
-    top = top_models(df, registry, named("bulk RNA"), 3)
-    assert top == []
-
-
 def test_ranked_is_empty_when_nobody_covered_the_board(registry, named, results):
     df = results(("partial", "t901", 0.9, "2026-01-01"))
     assert ranked_table(df, registry, named("Rheumatology")).empty
@@ -217,15 +210,17 @@ def test_per_task_exposes_sd_only_for_multiple_stored_repeats(registry, named, r
     assert len(table.attrs["repeat_standard_deviations"]) == 1
 
 
-def test_area_board_replaces_the_redundant_area_with_modality(registry, named, results):
+def test_per_task_shows_only_the_metadata_that_varies(registry, named, results):
     df = results(("m", "t904", 0.5, "2026-01-01"))
-    table = per_task_table(df, registry, named("Dermatology"))
+    dermatology = per_task_table(df, registry, named("Dermatology"))
+    bulk = per_task_table(df, registry, named("bulk RNA"))
 
-    assert "Area" not in table
-    assert table.loc[0, "Modality"] == "Bulk RNAseq"
+    assert {"Area", "Family", "Modality"}.isdisjoint(dermatology.columns)
+    assert {"Area", "Family"} <= set(bulk.columns)
+    assert "Modality" not in bulk.columns
 
 
-def test_category_boards_keep_area_and_modality_with_separate_tasks(registry, results):
+def test_category_boards_keep_each_modality_to_its_own_tasks(registry, results):
     registry["t906"] = {
         **registry["t905"],
         "task_id": "t906",
@@ -245,16 +240,8 @@ def test_category_boards_keep_area_and_modality_with_separate_tasks(registry, re
         for board in boards
     }
 
-    bulk = tables["bulk RNA"]
-    single_cell = tables["Single Cell RNA"]
-    assert bulk.loc["RA blood endotype", "Area"] == "Rheumatology"
-    assert bulk.loc["RA blood endotype", "Modality"] == "Bulk RNAseq"
-    assert list(bulk.index) == ["RA blood endotype"]
-    assert single_cell.loc["Single-cell RA endotype", "Area"] == "Rheumatology"
-    assert (
-        single_cell.loc["Single-cell RA endotype", "Modality"] == "Single-cell RNAseq"
-    )
-    assert list(single_cell.index) == ["Single-cell RA endotype"]
+    assert list(tables["bulk RNA"].index) == ["RA blood endotype"]
+    assert list(tables["Single Cell RNA"].index) == ["Single-cell RA endotype"]
 
 
 def test_reserved_names_cover_the_metadata_columns_of_every_board_type(
@@ -266,7 +253,7 @@ def test_reserved_names_cover_the_metadata_columns_of_every_board_type(
     modality = per_task_table(df, registry, named("bulk RNA"))
     metadata = (set(area.columns) | set(modality.columns)) - {"m"}
 
-    assert RESERVED_COLUMNS == metadata
+    assert metadata <= RESERVED_COLUMNS
 
 
 def test_per_task_only_shows_the_board_it_was_asked_for(registry, named, results):
@@ -278,24 +265,6 @@ def test_per_task_only_shows_the_board_it_was_asked_for(registry, named, results
 def test_per_task_is_empty_when_no_result_touches_the_board(registry, named, results):
     df = results(("partial", "t901", 0.9, "2026-01-01"))
     assert per_task_table(df, registry, named("Rheumatology")).empty
-
-
-def test_top_models_are_ordered_and_limited(registry, named, results):
-    df = results(
-        *_full("a", "2026-01-01", scores=(0.9,) * 5),
-        *_full("b", "2026-01-01", scores=(0.5,) * 5),
-        *_full("c", "2026-01-01", scores=(0.1,) * 5),
-    )
-    top = top_models(df, registry, named("bulk RNA"), 2)
-    assert [entry.name for entry in top] == ["a", "b"]
-    assert top_models(df, registry, named("bulk RNA"), 3)[0].elo > 1000
-
-
-def test_top_models_uses_the_remaining_scored_tasks(registry, named, results):
-    df = results(("partial", "t901", 0.99, "2026-01-01"))
-    assert [entry.name for entry in top_models(df, registry, named("bulk RNA"), 3)] == [
-        "partial"
-    ]
 
 
 def test_a_baseline_is_ranked_in_place_and_labelled(registry, named, flagged_results):
@@ -346,12 +315,6 @@ def test_per_task_columns_name_the_baseline(registry, named, flagged_results):
     table = per_task_table(df, registry, named("Dermatology"))
     assert "random-32 (baseline)" in table.columns
     assert table.loc[0, "Best"] == "random-32 (baseline)"
-
-
-def test_top_models_rank_a_baseline_in_place(registry, named, flagged_results):
-    """A baseline is a card leader like any other, never filtered out of the teaser."""
-    df = flagged_results(*_flagged("pca-50", "2026-01-01", True))
-    assert top_models(df, registry, named("bulk RNA"), 3)[0].name == "pca-50"
 
 
 def _anchor(at: str, baseline: bool = True, scores=ALL_SCORES) -> list[tuple]:

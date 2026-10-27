@@ -1,10 +1,10 @@
 """The PRIMO pages, rendered as ``pm-*`` markup for ``gr.HTML`` blocks.
 
 Gradio has no card or rich-table component, so every page here is a string of
-HTML styled entirely by ``primo.css`` -- the rail, the board grid, the
-leaderboard tables and the tasks table. The functions are pure: they take the
-data the app already fetched (``Board`` objects, the results ``DataFrame``, the
-registry) and return a string, so they unit-test without Gradio or a network.
+HTML styled entirely by ``primo.css`` -- the top bar, the hero, the leaderboard
+tables, the release notes and the tasks table. The functions are pure: they take
+the data the app already fetched (``Board`` objects, the results ``DataFrame``,
+the registry) and return a string, so they unit-test without Gradio or a network.
 
 Two rules hold everywhere:
 
@@ -15,59 +15,48 @@ Two rules hold everywhere:
   link. Private legacy ``hf_username`` values stay hidden. Public strings and
   links are validated and escaped before rendering.
 
-Navigation is reload-based: the rail is a column of ``<a href="?board=slug">``
-and ``<a href="?tab=name">`` links, which costs a page load per click but buys
-shareable per-board URLs and needs no JavaScript, matching how the board cards
-have always worked. On a closed board version, every link adds
-``&version=<number>`` so the visitor stays on it, except Submit: a submission
-always goes to the current version.
+Pages are reload-based ``<a href="?tab=name">`` links in the top bar; the
+leaderboard view is picked with Gradio pills in ``app.py``. On a closed board
+version, every link adds ``&version=<number>`` so the visitor stays on it, except
+Submit: a submission always goes to the current version.
 """
 
 import math
 import numbers
+import re
 from html import escape
+from itertools import pairwise
 from urllib.parse import urlparse
 
 import pandas as pd
 from boards import (
     AREA_GROUP,
     CATEGORY_GROUP,
-    GROUP_NOTE,
     MODALITY_GROUP,
     Board,
-    OpenBoard,
-    board_label,
     in_group,
-    modality_label,
     open_in_group,
-    without_public,
 )
-from evaluator import _norm_id
 from leaderboard import (
+    ELO_ANCHOR_MODEL,
     ModelCell,
     TaskCell,
     per_task_table,
     ranked_table,
     tasks_table,
-    top_models,
 )
-from results import without_hvg
+from results import (
+    BASELINE_TAG,
+    IS_BASELINE,
+    MODEL_NAME,
+    split_hvg_name,
+    with_baseline_flag,
+    without_hvg,
+)
 from versions import CURRENT, VERSIONS, Version
 
 SECTIONS = (MODALITY_GROUP, AREA_GROUP, CATEGORY_GROUP)
-MEDALS = ("🥇", "🥈", "🥉")
-N_TOP_MODELS = len(MEDALS)
-
 VERSION_PARAM = "version"
-RELEASES_URL = "https://github.com/PRIMOmics/primo-eval/releases/tag"
-
-FOOT_LINKS = (
-    ("tasks", "Tasks"),
-    ("submit", "Submit a model"),
-    ("contribute", "Contribute"),
-    ("method", "Method"),
-)
-
 NAME_COLUMNS = frozenset({"Model", "Best"})
 STRONG_COLUMNS = frozenset({"Task"})
 METRIC_COLUMNS = frozenset({"Metric"})
@@ -81,6 +70,9 @@ METRIC_GUIDES = {
 PUBLIC_CHIP = (
     ' <span class="pm-public-chip" title="Labels downloadable from the PRIMO '
     'dataset" aria-label="Public labels">Public</span>'
+)
+BASELINE_CHIP = (
+    '<span class="pm-tag pm-tag--base" title="Our reference model">Baseline</span>'
 )
 
 
@@ -115,27 +107,11 @@ def evaluation_status() -> str:
     )
 
 
-CHEVRON = (
-    '<svg class="pm-chevron" viewBox="0 0 16 16" width="16" height="16" '
-    'aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="#fff" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-)
-
-
 def _href(query: str, version: Version = CURRENT) -> str:
     """A reload link that stays on ``version``; the current one needs no tag."""
     if version != CURRENT:
         query = f"{query}&{VERSION_PARAM}={version.number}"
     return escape(f"?{query}")
-
-
-# --------------------------------------------------------------------- rail
-def _brand(version: Version) -> str:
-    return (
-        f'<a class="pm-brand" target="_self" href="{_href("tab=boards", version)}">'
-        '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
-        "<b>PRIMO</b><span>benchmark</span></a>"
-    )
 
 
 def _number(version: Version) -> tuple[int, ...]:
@@ -147,215 +123,6 @@ def _closed_on(version: Version) -> str:
     """The day the version after ``version`` opened."""
     later = [listed for listed in VERSIONS if _number(listed) > _number(version)]
     return min(later, key=_number).opened
-
-
-def _closed_notice(version: Version) -> str:
-    """On a closed version, say so and link back to the current one."""
-    if version == CURRENT:
-        return ""
-    return (
-        '<div class="pm-rail-notice">'
-        f"<b>Version v{escape(version.number)} is closed</b>"
-        f"<span>Its scores, from {escape(version.opened)} to "
-        f"{escape(_closed_on(version))}, are kept read-only.</span>"
-        f'<a target="_self" href="{_href("tab=boards")}">'
-        f"Go to the current version, v{escape(CURRENT.number)}</a></div>"
-    )
-
-
-def _page_query(active_slug: str | None, active_tab: str | None) -> str:
-    """The page on screen, so a version switch stays on it; Submit goes to Boards."""
-    if active_slug:
-        return f"board={active_slug}"
-    if active_tab and active_tab != "submit":
-        return f"tab={active_tab}"
-    return "tab=boards"
-
-
-def _version_menu(version: Version, page: str) -> str:
-    """The dropdown under the logo: every version, then the release notes."""
-    state = "current" if version == CURRENT else "closed"
-    parts = [
-        '<details class="pm-version"><summary class="pm-version-summary">'
-        f'<span class="pm-label">Version v{escape(version.number)}</span>'
-        f'<span class="pm-count">{state}</span>{CHEVRON}</summary>',
-        '<div class="pm-version-list">',
-    ]
-    for listed in VERSIONS:
-        cls = "pm-link pm-active" if listed == version else "pm-link"
-        note = "current" if listed == CURRENT else f"from {listed.opened}"
-        parts.append(
-            f'<a class="{cls}" target="_self" href="{_href(page, listed)}">'
-            f'<span class="pm-label">v{escape(listed.number)}</span>'
-            f'<span class="pm-count">{escape(note)}</span></a>'
-        )
-    notes = escape(f"{RELEASES_URL}/{version.release}")
-    parts.append(
-        f'<a class="pm-link" target="_blank" rel="noopener" href="{notes}">'
-        '<span class="pm-label">Release notes</span>'
-        f'<span class="pm-count">{escape(version.release)}</span></a></div></details>'
-    )
-    return "".join(parts)
-
-
-def rail_html(
-    boards: list[Board],
-    active_slug: str | None,
-    active_tab: str | None,
-    version: Version = CURRENT,
-) -> str:
-    """The left navigation: brand, version menu, "Boards" menu, then the foot links.
-
-    The board groups live inside a ``<details>`` toggle so the four foot links
-    (Tasks, Submit, Contribute, Method) stay visible without scrolling. The toggle
-    is pure HTML/CSS, keeping navigation reload-based and JavaScript-free.
-
-    ``active_slug`` highlights the board a visitor is on; ``active_tab`` highlights
-    a foot link, and its absence means we are on a board or the overview, so the
-    "Boards" menu is the active one. Open boards link to Contribute, mirroring the
-    overview cards. ``version`` is the board version on screen; the version menu
-    under the brand switches it and stays on the same page.
-    """
-    on_boards = active_tab is None
-    summary_cls = "pm-rail-summary pm-active" if on_boards else "pm-rail-summary"
-    parts = [
-        '<div class="pm-rail-inner">',
-        _brand(version),
-        _version_menu(version, _page_query(active_slug, active_tab)),
-        _closed_notice(version),
-        '<details class="pm-rail-section" open>',
-        f'<summary class="{summary_cls}"><span>Boards</span>{CHEVRON}</summary>',
-        '<div class="pm-rail-sections">',
-    ]
-    for group in SECTIONS:
-        cards, opens = in_group(boards, group), open_in_group(boards, group)
-        if not cards and not opens:
-            continue
-        parts.append(
-            f'<div class="pm-rail-group"><p class="pm-rail-label">{escape(group)}</p>'
-        )
-        for board in cards:
-            cls = "pm-link pm-active" if board.slug == active_slug else "pm-link"
-            href = _href(f"board={board.slug}", version)
-            parts.append(
-                f'<a class="{cls}" target="_self" href="{href}">'
-                f'<span class="pm-label">{escape(board_label(board))}</span>'
-                f'<span class="pm-count">{board.n_tasks}</span></a>'
-            )
-        for board in opens:
-            href = _href("tab=contribute", version)
-            parts.append(
-                f'<a class="pm-link pm-link--open" target="_self" href="{href}">'
-                f'<span class="pm-label">{escape(board.name)}</span>'
-                '<span class="pm-badge pm-badge--quiet">open</span></a>'
-            )
-        parts.append("</div>")
-    parts.append("</div></details>")
-    parts.append('<div class="pm-rail-foot">')
-    for tab, label in FOOT_LINKS:
-        cls = "pm-foot-link pm-active" if tab == active_tab else "pm-foot-link"
-        href = _href(f"tab={tab}", CURRENT if tab == "submit" else version)
-        parts.append(
-            f'<a class="{cls}" target="_self" href="{href}">{escape(label)}</a>'
-        )
-    parts.append("</div></div>")
-    return "".join(parts)
-
-
-# ------------------------------------------------------------------ boards
-def _leading(top) -> str:
-    """The card's mini-ranking: a medal, a name and an Elo, one line each.
-
-    An empty board asks for the first submission instead of naming a leader.
-
-    Every listed model gets a medal, so ``MEDALS`` is what bounds the podium and
-    ``N_TOP_MODELS`` is derived from it -- the two cannot drift into a rank with
-    no medal to print.
-
-    A baseline is listed like any other leader. The card marks nothing; the board
-    page is where a rating is read against the ``(baseline)`` it anchors on.
-    """
-    parts = ['<p class="pm-over" style="margin-top:14px">Leading (Elo)</p>']
-    if not top:
-        parts.append(
-            '<p class="pm-leader pm-leader--2">No ranked model yet. Be the first.</p>'
-        )
-        return "".join(parts)
-    for medal, row in zip(MEDALS, top, strict=False):
-        score = "n/a" if row.elo is None else str(row.elo)
-        parts.append(
-            f'<p class="pm-leader"><span class="pm-medal">{medal}</span>'
-            f"{escape(row.name)}"
-            f' <span class="pm-num--dim">{score}</span></p>'
-        )
-    return "".join(parts)
-
-
-def _live_card(
-    board: Board, df: pd.DataFrame, by_id: dict[str, dict], version: Version
-) -> str:
-    top = top_models(df, by_id, board, N_TOP_MODELS)
-    href = _href(f"board={board.slug}", version)
-    return (
-        f'<a class="pm-card pm-card--live" target="_self" href="{href}">'
-        f"<h3>{escape(board_label(board))}</h3>"
-        f'<p class="pm-meta">{board.n_tasks} tasks · {board.n_cohorts} cohorts<br>'
-        f"{board.n_patients:,} patients · {board.n_diseases} diseases</p>"
-        f"{_leading(top)}</a>"
-    )
-
-
-def _open_card(board: OpenBoard, version: Version) -> str:
-    return (
-        '<a class="pm-card pm-card--open" target="_self" '
-        f'href="{_href("tab=contribute", version)}">'
-        f"<h3>{escape(board.name)}</h3>"
-        '<p class="pm-meta"><span class="pm-badge pm-badge--quiet">OPEN · no cohort yet</span></p>'
-        f'<p class="pm-asks">{escape(board.blurb)}</p>'
-        '<p class="pm-cta">Propose a cohort →</p></a>'
-    )
-
-
-def render_boards(
-    boards: list[Board],
-    df: pd.DataFrame,
-    by_id: dict[str, dict],
-    version: Version = CURRENT,
-) -> str:
-    """The Boards overview: every board as a card, grouped by facet.
-
-    Live cards link to their board and teaser their leaders; open cards state a
-    gap and link to Contribute. A section counts its open slices so the page
-    reads as showing its own gaps, not the registry as the whole territory.
-    """
-    if not boards:
-        return (
-            '<div class="pm-body"><p class="pm-caption">The task registry is '
-            "unavailable right now. Please retry in a moment.</p></div>"
-        )
-    out = [
-        '<div class="pm-head"><div><h1>Leaderboards</h1>',
-        "<p>PRIMO evaluates zero-shot representations of omics samples through "
-        "drug-development-related tasks. Benchmarks are organized by data "
-        "modality, therapeutic area, or task category.</p></div></div>",
-        '<div class="pm-body">',
-    ]
-    for group in SECTIONS:
-        cards, opens = in_group(boards, group), open_in_group(boards, group)
-        if not cards and not opens:
-            continue
-        note = escape(GROUP_NOTE.get(group, ""))
-        counter = f" · +{len(opens)} open" if opens else ""
-        out.append(
-            '<div class="pm-group"><div class="pm-group-head">'
-            f'<p class="pm-over">{escape(group)}</p>'
-            f'<p class="pm-note">{note}{counter}</p></div><div class="pm-grid">'
-        )
-        out += [_live_card(b, df, by_id, version) for b in cards]
-        out += [_open_card(b, version) for b in opens]
-        out.append("</div></div>")
-    out.append("</div>")
-    return "".join(out)
 
 
 # ------------------------------------------------------------- html tables
@@ -378,8 +145,11 @@ def _fmt_value(value, is_score: bool) -> str | None:
 
 
 def _model_cell_html(cell: ModelCell) -> str:
-    """Render one model label, allowing only escaped HTTP(S) paper links."""
-    label = escape(str(cell))
+    """One model on one line: its name, its chips, then a dotted leader.
+
+    Only escaped HTTP(S) paper links become links.
+    """
+    label = escape(str(cell).removesuffix(f" {BASELINE_TAG}"))
     parsed = urlparse(cell.paper_link)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         url = escape(cell.paper_link, quote=True)
@@ -387,20 +157,31 @@ def _model_cell_html(cell: ModelCell) -> str:
             f'<a class="pm-model-link" href="{url}" target="_blank" '
             f'rel="noopener noreferrer">{label}</a>'
         )
-    hvg_chip = (
-        ' <span class="pm-hvg-chip" title="Concatenated with the HVG-1200 baseline '
-        'features" aria-label="Concatenated with the HVG-1200 baseline features">'
-        "+ HVG</span>"
-        if cell.is_hvg
-        else ""
+    chips = []
+    if cell.is_hvg:
+        chips.append(
+            '<span class="pm-tag pm-tag--hvg" title="Concatenated with the HVG-1200 '
+            'baseline features" aria-label="Concatenated with the HVG-1200 baseline '
+            'features">+ HVG</span>'
+        )
+    if cell.is_baseline:
+        chips.append(BASELINE_CHIP)
+    if cell.is_author_submission:
+        chips.append(
+            '<span class="pm-tag pm-tag--author" title="Submitted by the model '
+            'authors" aria-label="Submitted by the model authors">✓ Authors</span>'
+        )
+    return (
+        f'<div class="pm-pipe"><span class="pm-lrn">{label}</span>'
+        f'{"".join(chips)}<span class="pm-leader"></span></div>'
     )
-    author_chip = (
-        ' <span class="pm-author-chip" title="Submitted by the model authors" '
-        'aria-label="Submitted by the model authors">✓ Authors</span>'
-        if cell.is_author_submission
-        else ""
-    )
-    return label + hvg_chip + author_chip
+
+
+def _with_baseline_chip(name: str) -> str:
+    """The escaped name, its ``(baseline)`` tag shown as the Baseline chip."""
+    if not name.endswith(f" {BASELINE_TAG}"):
+        return escape(name)
+    return f"{escape(name.removesuffix(f' {BASELINE_TAG}'))} {BASELINE_CHIP}"
 
 
 def _score_columns(df: pd.DataFrame) -> list[str]:
@@ -411,7 +192,7 @@ def _score_columns(df: pd.DataFrame) -> list[str]:
 def _score_guide(col: str, row: pd.Series) -> str | None:
     """Return metric context for a native score cell, when identifiable."""
     metric = next((name for name in METRIC_GUIDES if f"({name})" in col), None)
-    if metric is None and col not in {"Elo", "Mean rank", "Mean score"}:
+    if metric is None and col not in {"Elo", "Mean rank"}:
         metric = str(row.get("Metric", ""))
     return METRIC_GUIDES.get(metric) if metric is not None else None
 
@@ -503,6 +284,7 @@ def _df_to_table(
 
     head = []
     for index, col in enumerate(df.columns):
+        name = _with_baseline_chip(str(col))
         align = (
             ' style="text-align:right"'
             if col in score_cols or col in RIGHT_COLUMNS
@@ -511,7 +293,7 @@ def _df_to_table(
         head.append(
             f'<th class="pm-sort" data-sort-index="{index}" tabindex="0" '
             f'role="button" aria-sort="none" title="Sort by {escape(str(col))}"'
-            f"{align}>{escape(str(col))}</th>"
+            f"{align}>{name}</th>"
         )
     body = []
     for idx, row in df.iterrows():
@@ -529,6 +311,8 @@ def _df_to_table(
                 if isinstance(row[col], ModelCell)
                 else "n/a"
                 if text is None
+                else _with_baseline_chip(text)
+                if col in NAME_COLUMNS
                 else escape(text)
             )
             standard_deviation = repeat_sd.get((idx, col))
@@ -563,7 +347,8 @@ def _df_to_table(
                     task_label = escape(f"{text}. {tooltip}", quote=True)
                     shown = (
                         '<span class="pm-task-guide" tabindex="0" '
-                        f'aria-label="{task_label}" data-tooltip="{escaped_tooltip}">{shown}</span>'
+                        f'aria-label="{task_label}" data-tooltip="{escaped_tooltip}">'
+                        f'<span class="pm-task-text">{shown}</span></span>'
                     )
             if isinstance(row[col], TaskCell) and row[col].is_public:
                 shown += PUBLIC_CHIP
@@ -578,131 +363,6 @@ def _df_to_table(
         '<div class="pm-table-wrap"><table class="pm-table" style="table-layout:auto">'
         f"<thead><tr>{''.join(head)}</tr></thead>"
         f"<tbody>{''.join(body)}</tbody></table></div>"
-    )
-
-
-# ------------------------------------------------------------------- board
-def _board_meta(board: Board) -> str:
-    return (
-        f"{escape(board.blurb)} · {board.n_tasks} tasks · {board.n_cohorts} cohorts · "
-        f"{board.n_patients:,} patients · {escape(modality_label(board.modality))}"
-    )
-
-
-HVG_TOGGLE = (
-    '<input type="checkbox" id="pm-hvg-toggle" class="pm-check pm-hvg-toggle" '
-    'checked><label class="pm-switch" for="pm-hvg-toggle">Include models '
-    '<span class="pm-hvg-chip">+ HVG</span></label>'
-)
-PRIVATE_TOGGLE = (
-    '<input type="checkbox" id="pm-private-toggle" class="pm-check '
-    'pm-private-toggle"><label class="pm-switch" for="pm-private-toggle" '
-    'title="Leave out the tasks whose labels are public">Only private tasks</label>'
-)
-
-
-def _board_tables(
-    board: Board, df: pd.DataFrame, by_id: dict[str, dict]
-) -> tuple[str, str]:
-    """The ranked and per-task tables of ``board`` over the rows of ``df``."""
-    ranked = _df_to_table(
-        ranked_table(df, by_id, board),
-        bold_axis=0,
-        empty="No model has covered every scored task of this board yet. Be the first to submit.",
-    )
-    per_task = _df_to_table(
-        per_task_table(df, by_id, board),
-        bold_axis=1,
-        empty="No submission has scored on this board yet.",
-        task_guides=by_id,
-    )
-    return ranked, per_task
-
-
-def _hvg_states(board: Board, df: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
-    """With and without ``+ HVG`` entries if some score on ``board``, else as is."""
-    on_board = df[df["task_id"].map(_norm_id).isin(list(board.task_ids))]
-    if len(without_hvg(on_board)) == len(on_board):
-        return [("", df)]
-    return [("pm-with-hvg", df), ("pm-without-hvg", without_hvg(df))]
-
-
-def _scope_states(board: Board, by_id: dict[str, dict]) -> list[tuple[str, Board]]:
-    """All tasks and the private ones if ``board`` mixes both, else the board."""
-    private = without_public(board, by_id)
-    if private.task_ids in (frozenset(), board.task_ids):
-        return [("", board)]
-    return [("pm-all-tasks", board), ("pm-private-tasks", private)]
-
-
-def _variant(html: str, *classes: str) -> str:
-    """One rendering of a table; the board's checkboxes show one via ``primo.css``."""
-    names = " ".join(name for name in classes if name)
-    return f'<div class="{names}">{html}</div>' if names else html
-
-
-def _head_meta(board: Board, by_id: dict[str, dict]) -> str:
-    """The board's numbers once per scope; ``primo.css`` shows the ticked one."""
-    lines = []
-    for scope, scoped in _scope_states(board, by_id):
-        cls = f' class="{scope}"' if scope else ""
-        lines.append(f"<p{cls}>{_board_meta(scoped)}</p>")
-    return "".join(lines)
-
-
-def _board_body(board: Board, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
-    """The switches, then the ranked leaderboard and the per-task table.
-
-    Both tables are rendered once per switch state, so hiding ``+ HVG`` entries
-    or public tasks refits Elo and re-ranks rather than just dropping rows. The
-    CSS-only checkboxes must stay siblings that precede the groups, as
-    ``primo.css`` selects with ``~``.
-    """
-    hvg_states, scopes = _hvg_states(board, df), _scope_states(board, by_id)
-    ranked, per_task = "", ""
-    for scope, scoped in scopes:
-        for hvg, rows in hvg_states:
-            ranked_html, per_task_html = _board_tables(scoped, rows, by_id)
-            ranked += _variant(ranked_html, hvg, scope)
-            per_task += _variant(per_task_html, hvg, scope)
-    toggles = "<br>".join(
-        toggle
-        for toggle, states in ((HVG_TOGGLE, hvg_states), (PRIVATE_TOGGLE, scopes))
-        if len(states) > 1
-    )
-    return (
-        f"{toggles}"
-        '<div class="pm-group"><div class="pm-group-head">'
-        '<p class="pm-over pm-over--marine">Ranked</p>'
-        '<p class="pm-note">We evaluate zero-shot representations of models, so '
-        "performance should not be considered as the best we can obtain. Only "
-        "models that covered every task scored by the "
-        "HVG-1200 log-normalized linear baseline "
-        "(<code>HVG-1200-genes</code>) are ranked. "
-        "<code>+ HVG</code> rows concatenate a model with the baseline's "
-        "features.</p>"
-        f"</div>{ranked}</div>"
-        '<div class="pm-group"><div class="pm-group-head">'
-        '<p class="pm-over pm-over--marine">Per task</p>'
-        '<p class="pm-note">Every submission, partial ones included. Read across a row. '
-        "Scores show mean ± SD when repeat-level results are available.</p>"
-        f"</div>{per_task}</div>"
-    )
-
-
-def render_board(board: Board | None, df: pd.DataFrame, by_id: dict[str, dict]) -> str:
-    """One board: title strip, the ranked leaderboard, then the per-task table."""
-    if board is None:
-        return (
-            '<div class="pm-head"><div><h1>No board available</h1>'
-            "<p>The task registry could not be loaded. Please retry shortly.</p>"
-            "</div></div>"
-        )
-    return (
-        '<div class="pm-head"><div><p class="pm-over">Board</p>'
-        f"<h1>{escape(board_label(board))}</h1>"
-        f"{_head_meta(board, by_id)}</div></div>"
-        f'<div class="pm-body">{_board_body(board, df, by_id)}</div>'
     )
 
 
@@ -722,4 +382,492 @@ def render_tasks(by_id: dict[str, dict]) -> str:
         "one out of your embedding; the cohorts stay anonymous, the biology does "
         "not.</p></div></div>"
         f'<div class="pm-body">{table}</div>'
+    )
+
+
+# ------------------------------------------------------------- leaderboard
+SPACE_URL = "https://huggingface.co/spaces/PRIMOmics/primo-eval"
+DATA_URL = "https://huggingface.co/datasets/PRIMOmics/primo"
+PAPER_URL = "https://openreview.net/forum?id=v2SA8gHwqo"
+
+NAV_TABS = (
+    ("leaderboard", "Leaderboard"),
+    ("tasks", "Tasks"),
+    ("method", "Method"),
+    ("contribute", "Contribute"),
+)
+LEDE = (
+    "PRIMO ranks omics foundation models on real "
+    '<a target="_self" href="{tasks}">clinical tasks</a>. Your model turns each '
+    "patient's omics profile into an embedding. One fixed probe, the same for every "
+    "model, then predicts hidden outcomes such as treatment response or prognosis, "
+    "so the score measures the embedding."
+)
+RANKED_NOTE = (
+    '<p class="pm-note">We score zero-shot representations, so a score is not the '
+    "best a model can reach. Only models that covered every task scored by the "
+    f"<code>{ELO_ANCHOR_MODEL}</code> baseline are ranked. <code>+ HVG</code> rows "
+    "concatenate a model with the baseline's features.</p>"
+)
+N_TOP = 3
+ORDINAL_SUFFIXES = {1: "st", 2: "nd", 3: "rd"}
+NOT_SCORES = frozenset({"Rank", "Submissions count"})
+RANKED_LABELS = {"Submissions count": "Subm."}
+RANKED_NOTES = {"Model": "paper linked when given"}
+RANKED_HINTS = {
+    "Elo": f"The {ELO_ANCHOR_MODEL} baseline sits at 1000.",
+    "Mean rank": "Lower is better.",
+    "Submissions count": (
+        "Submissions: the most times one task of this model was submitted."
+    ),
+}
+SHORT_METRICS = {
+    "Centered Spearman score": "centered Spearman",
+    "Residual Spearman score": "residual Spearman",
+}
+CATEGORY_HEADER = re.compile(r"^(?P<name>.+) \((?P<metric>[^()]+)\)$")
+STRABLE_URL = "https://gblayer.github.io/strable-leaderboard/"
+BOARD_SUB = (
+    '<p class="pm-board-sub">Models are ranked by Elo over the tasks of the view, '
+    f"anchored on the {ELO_ANCHOR_MODEL} baseline at 1000. Task columns show the "
+    "mean score, each in its own metric.</p>"
+)
+ART_GENES = (0.55, 0.9, 0.4, 0.75, 0.35, 0.95, 0.5, 0.8, 0.45, 0.7, 0.3, 0.85, 0.6, 0.4)
+ART_EMBEDDING = (0.7, 1.0, 0.6, 0.9, 0.75, 0.95)
+ART_LAYERS = ((4, 132), (5, 150), (3, 168))
+ART_TASKS = ("Treatment response", "Prognosis", "Disease severity", "Molecular subtype")
+CREDIT = (
+    '<p class="pm-credit">Design inspired by the '
+    f'<a href="{STRABLE_URL}" target="_blank" rel="noopener noreferrer">STRABLE '
+    "leaderboard</a>.</p>"
+)
+
+
+def _art_text(x: float, y: float, text: str, cls: str, anchor: str = "middle") -> str:
+    return f'<text class="{cls}" x="{x}" y="{y}" text-anchor="{anchor}">{text}</text>'
+
+
+def _art_arrow(x1: float, x2: float, y: float) -> str:
+    return (
+        f'<line class="pm-art-line" x1="{x1}" y1="{y}" x2="{x2 - 6}" y2="{y}"></line>'
+        f'<path class="pm-art-head" d="M{x2 - 7} {y - 4} L{x2} {y} L{x2 - 7} {y + 4} Z">'
+        "</path>"
+    )
+
+
+def _hero_art() -> str:
+    """The hero figure: a patient's omics, a model, one embedding, many tasks."""
+    parts = [
+        _art_text(58, 22, "Patient omics", "pm-art-h"),
+        _art_text(162, 22, "Your model", "pm-art-h"),
+        _art_text(254, 22, "Embedding", "pm-art-h"),
+        _art_text(351, 22, "Clinical tasks", "pm-art-h"),
+        '<circle class="pm-art-patient" cx="58" cy="44" r="8"></circle>',
+        '<path class="pm-art-patient" d="M45 66 Q58 50 71 66 Z"></path>',
+    ]
+    parts += [
+        f'<rect class="pm-art-{"b" if index % 3 == 0 else "a"}" x="47" '
+        f'y="{74 + index * 11}" width="22" height="9" rx="1.5" opacity="{level}"></rect>'
+        for index, level in enumerate(ART_GENES)
+    ]
+    parts += [
+        _art_text(58, 246, "gene expression", "pm-art-c"),
+        _art_arrow(78, 112, 150),
+        '<rect class="pm-art-box" x="114" y="112" width="96" height="76" rx="14"></rect>',
+    ]
+    nodes = [
+        [(162 + (k - (count - 1) / 2) * 16, y) for k in range(count)]
+        for count, y in ART_LAYERS
+    ]
+    parts += [
+        f'<line class="pm-art-edge" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"></line>'
+        for upper, lower in pairwise(nodes)
+        for x1, y1 in upper
+        for x2, y2 in lower
+    ]
+    parts += [
+        f'<circle class="pm-art-node" cx="{x}" cy="{y}" r="3.2"></circle>'
+        for layer in nodes
+        for x, y in layer
+    ]
+    parts += [
+        _art_text(162, 204, "omics foundation model", "pm-art-c"),
+        _art_arrow(212, 244, 150),
+    ]
+    parts += [
+        f'<rect class="pm-art-{"a" if index % 2 else "b"}" x="246" y="{100 + index * 17}" '
+        f'width="16" height="14" rx="2" opacity="{level}"></rect>'
+        for index, level in enumerate(ART_EMBEDDING)
+    ]
+    parts += [
+        _art_text(254, 218, "sample", "pm-art-c"),
+        _art_text(254, 230, "representation", "pm-art-c"),
+    ]
+    for index, task in enumerate(ART_TASKS):
+        y = 74 + index * 44
+        parts += [
+            f'<path class="pm-art-line" d="M268 150 C 278 150, 278 {y}, 288 {y}"></path>',
+            f'<rect class="pm-art-pill" x="290" y="{y - 14}" width="122" height="28" '
+            'rx="14"></rect>',
+            _art_text(302, y + 4, task, "pm-art-t", anchor="start"),
+        ]
+    return (
+        '<div class="pm-art"><svg class="pm-hero-art" viewBox="0 0 420 268" '
+        'role="img" aria-labelledby="pm-art-title"><title id="pm-art-title">A patient\'s '
+        "omics profile goes through your model, which returns one embedding per "
+        "sample. The same fixed probe then scores that embedding on clinical tasks."
+        f"</title>{''.join(parts)}</svg></div>"
+    )
+
+
+def updated_on(df: pd.DataFrame) -> str:
+    """The day of the latest stored result, or ``""`` when there is none."""
+    if df.empty or "submitted_at" not in df:
+        return ""
+    return str(df["submitted_at"].astype(str).max())[:10]
+
+
+def _model_count(df: pd.DataFrame) -> int:
+    """Submitted models, a ``+ HVG`` entry counted with its parent, baselines out."""
+    flagged = with_baseline_flag(df)
+    if flagged.empty:
+        return 0
+    return len(
+        {
+            split_hvg_name(str(model))[0]
+            for model, is_baseline in zip(flagged[MODEL_NAME], flagged[IS_BASELINE])
+            if not is_baseline
+        }
+    )
+
+
+def version_notice(version: Version) -> str:
+    """On a closed version, a banner that says so and links to the current one."""
+    if version == CURRENT:
+        return ""
+    return (
+        '<div class="pm-notice" role="status">'
+        f"<b>Version v{escape(version.number)} is closed.</b> "
+        f"Its scores, from {escape(version.opened)} to "
+        f"{escape(_closed_on(version))}, are kept read-only. "
+        f'<a target="_self" href="{_href("tab=leaderboard")}">'
+        f"Go to the current version, v{escape(CURRENT.number)}</a></div>"
+    )
+
+
+def _cite_dialog(version: Version) -> str:
+    """The window of the Cite button: how to cite PRIMO and the version on screen."""
+    bibtex = (
+        "@misc{primo2026,\n"
+        "  title        = {{PRIMO}: Patient Representations in Multi-Omics},\n"
+        "  author       = {{PRIMO contributors}},\n"
+        "  year         = {2026},\n"
+        f"  note         = {{Leaderboard version {version.number}}},\n"
+        f"  howpublished = {{\\url{{{SPACE_URL}}}}}\n"
+        "}"
+    )
+    return (
+        '<dialog id="pm-cite-dialog" class="pm-dialog" aria-labelledby="pm-cite-title">'
+        '<form method="dialog" class="pm-dialog-surface">'
+        '<h2 id="pm-cite-title">Cite PRIMO</h2>'
+        "<p><b>Evaluating a model on PRIMO?</b> Please cite PRIMO and give the board "
+        "version you used, for example "
+        f"<code>PRIMO leaderboard v{escape(version.number)}</code>.</p>"
+        f"<pre>{escape(bibtex)}</pre>"
+        '<div class="pm-dialog-actions">'
+        '<button class="pm-btn pm-btn--outline" value="close">Close</button>'
+        "</div></form></dialog>"
+    )
+
+
+def nav_html(active_tab: str, version: Version = CURRENT) -> str:
+    """The top bar: the PRIMO mark, the pages, the data, the paper, Submit and Cite.
+
+    On a closed version, every page link keeps it, except Submit, Cite names it,
+    and a banner under the bar says the version is closed.
+    """
+    links = [
+        f'<a class="{"pm-active" if tab == active_tab else ""}" target="_self" '
+        f'href="{_href(f"tab={tab}", version)}">{name}</a>'
+        for tab, name in NAV_TABS
+    ]
+    links += [
+        f'<a href="{url}" target="_blank" rel="noopener noreferrer">{name}</a>'
+        for url, name in ((DATA_URL, "Data"), (PAPER_URL, "Paper"))
+    ]
+    return (
+        '<header class="pm-nav"><a class="pm-logo" target="_self" '
+        f'href="{_href("tab=leaderboard", version)}" aria-label="PRIMO leaderboard">'
+        '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
+        "<b>PRIMO</b></a>"
+        '<div class="pm-nav-right">'
+        f'<nav class="pm-nav-links" aria-label="Main">{"".join(links)}</nav>'
+        '<a class="pm-btn" target="_self" href="?tab=submit">Submit a model</a>'
+        '<button type="button" class="pm-btn pm-btn--outline" id="pm-cite-btn" '
+        'aria-haspopup="dialog" aria-controls="pm-cite-dialog">Cite</button>'
+        f"</div></header>{_cite_dialog(version)}{version_notice(version)}"
+    )
+
+
+def hero_html(boards: list[Board], df: pd.DataFrame, version: Version = CURRENT) -> str:
+    """The title block: version, PRIMO, what it is, its size, and the visual."""
+    layers = in_group(boards, MODALITY_GROUP)
+    stats = (
+        (sum(b.n_tasks for b in layers), "tasks"),
+        (sum(b.n_cohorts for b in layers), "cohorts"),
+        (sum(b.n_patients for b in layers), "patients"),
+        (len(layers), "modalities"),
+        (_model_count(df), "models"),
+    )
+    chips = "".join(f"<li><b>{n:,}</b> {name}</li>" for n, name in stats)
+    updated = updated_on(df)
+    stamp = (
+        f'<span class="pm-updated">Updated {escape(updated)}</span>' if updated else ""
+    )
+    badge = f'<span class="pm-ver">v{escape(version.number)}</span>'
+    if version != CURRENT:
+        badge = (
+            f'<span class="pm-ver pm-ver--closed">v{escape(version.number)} '
+            "· closed</span>"
+        )
+    return (
+        '<section class="pm-hero" aria-labelledby="pm-hero-title"><div>'
+        '<p class="pm-eyebrow"><span class="pm-label">Leaderboard</span>'
+        f'{badge}<a class="pm-ver-link" href="#pm-history">Release notes</a>'
+        f"{stamp}</p>"
+        '<h1 id="pm-hero-title">PRIMO</h1>'
+        '<p class="pm-expand"><span class="pm-xp"><b>P</b>atient <b>R</b>epresentations '
+        "<b>i</b>n <b>M</b>ulti-<b>O</b>mics</span></p>"
+        f'<p class="pm-lede">{LEDE.format(tasks=_href("tab=tasks", version))}</p>'
+        f'<ul class="pm-stats">{chips}</ul></div>'
+        f'<div class="pm-art-wrap">{_hero_art()}</div>'
+        "</section>"
+    )
+
+
+def _ordinal(rank: int) -> str:
+    """``1`` -> ``1st``, ``12`` -> ``12th``."""
+    suffix = "th" if 10 <= rank % 100 <= 20 else ORDINAL_SUFFIXES.get(rank % 10, "th")
+    return f"{rank}{suffix}"
+
+
+def _ranked_header(index: int, col: str, numeric: bool) -> str:
+    match = CATEGORY_HEADER.match(col)
+    if match:
+        name = match["name"]
+        note = SHORT_METRICS.get(match["metric"], match["metric"])
+    else:
+        name, note = RANKED_LABELS.get(col, col), RANKED_NOTES.get(col, "")
+    align = " pm-r" if numeric else ""
+    small = f"<small>{escape(note)}</small>" if note else ""
+    hint = escape(
+        f"Sort by {name.rstrip('.')}. {RANKED_HINTS.get(col, '')}".strip(), quote=True
+    )
+    return (
+        f'<th class="pm-sort{align}" data-sort-index="{index}" tabindex="0" '
+        f'role="button" aria-sort="none" title="{hint}">{escape(name)}{small}</th>'
+    )
+
+
+def _ranked_cell(
+    table: pd.DataFrame, idx, col: str, bold: set, scores: list, numeric: set
+) -> str:
+    """One cell of the ranked table, on one line."""
+    value = table.at[idx, col]
+    if col == "Rank":
+        return (
+            f'<td class="pm-rank" data-sort-value="{int(value)}">'
+            f"{_ordinal(int(value))}</td>"
+        )
+    if isinstance(value, ModelCell):
+        return (
+            f'<td class="pm-name" data-sort-value="{escape(str(value), quote=True)}">'
+            f"{_model_cell_html(value)}</td>"
+        )
+    is_score = col in scores
+    text = _fmt_value(value, is_score)
+    if col not in numeric:
+        shown = "n/a" if text is None else escape(text)
+        dim = " pm-dim" if text is None else ""
+        return f'<td class="pm-inst{dim}">{shown}</td>'
+    if text is None:
+        return '<td class="pm-num pm-dim">n/a</td>'
+    shown = escape(text)
+    guide = _score_guide(col, table.loc[idx]) if is_score else None
+    if guide:
+        label = escape(f"Score {text}. {guide}", quote=True)
+        shown = (
+            f'<span class="pm-score-guide" tabindex="0" aria-label="{label}" '
+            f'data-tooltip="{escape(guide, quote=True)}">{shown}</span>'
+        )
+    cls = "pm-num"
+    if col == "Elo":
+        cls += " pm-key"
+    if (idx, col) in bold:
+        cls += " pm-best"
+    return (
+        f'<td class="{cls}" data-sort-value="{escape(text, quote=True)}">{shown}</td>'
+    )
+
+
+def _count(n: int, noun: str) -> str:
+    """``<b>1</b> task``, ``<b>6</b> tasks``."""
+    return f"<b>{n:,}</b> {noun}{'' if n == 1 else 's'}"
+
+
+def _view_head(board: Board, view_name: str) -> str:
+    """The head of the ranking card: the view, then how many tasks it holds."""
+    counts = " · ".join(
+        (
+            _count(board.n_tasks, "task"),
+            _count(board.n_cohorts, "cohort"),
+            _count(board.n_patients, "patient"),
+        )
+    )
+    return (
+        f'<div class="pm-card-head"><span class="pm-view">{escape(view_name)}</span>'
+        f'<span class="pm-view-n">{counts}</span></div>'
+    )
+
+
+def _ranked_html(table: pd.DataFrame) -> str:
+    """The ranked table: one line per model, the top three framed."""
+    if table.empty:
+        return (
+            '<p class="pm-empty">No model has covered every scored task of this view '
+            "yet. Be the first to submit.</p>"
+        )
+    numeric = set(table.select_dtypes("number").columns)
+    scores = [c for c in table.columns if c in numeric and c not in NOT_SCORES]
+    bold = _bold_cells(table, scores, axis=0)
+    head = "".join(
+        _ranked_header(index, str(col), col in numeric)
+        for index, col in enumerate(table.columns)
+    )
+    n_top = min(N_TOP, len(table))
+    body = []
+    for position, idx in enumerate(table.index):
+        classes = []
+        if position < n_top:
+            classes.append("pm-top")
+        if position == 0:
+            classes.append("pm-top-first")
+        if position == n_top - 1:
+            classes.append("pm-top-last")
+        cells = "".join(
+            _ranked_cell(table, idx, str(col), bold, scores, numeric)
+            for col in table.columns
+        )
+        body.append(f'<tr class="{" ".join(classes)}">{cells}</tr>')
+    return (
+        '<div class="pm-tbl-wrap"><table class="pm-table pm-ranked">'
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody>"
+        "</table></div>"
+    )
+
+
+def _per_task_details(per_task: pd.DataFrame, by_id: dict, board: Board) -> str:
+    """The per-task scores, folded under the ranking."""
+    table = _df_to_table(
+        per_task,
+        bold_axis=1,
+        empty="No submission has scored on this view yet.",
+        task_guides=by_id,
+    )
+    return (
+        '<details class="pm-more"><summary><span class="pm-title">Scores per task'
+        f'</span><span class="pm-more-n">{board.n_tasks} tasks</span></summary>'
+        '<p class="pm-note">Every submission, partial ones included. Read across a '
+        "row. Scores show mean ± SD when repeat-level results are available.</p>"
+        f"{table}</details>"
+    )
+
+
+def render_view(
+    board: Board,
+    df: pd.DataFrame,
+    by_id: dict[str, dict],
+    view_name: str,
+    show_hvg: bool,
+) -> str:
+    """One view: its size, its ranking, then its per-task scores."""
+    rows = df if show_hvg else without_hvg(df)
+    head = _view_head(board, view_name)
+    if not by_id:
+        return (
+            f'<div class="pm-card">{head}<p class="pm-empty">The task registry could '
+            "not be loaded. Please retry in a moment.</p></div>"
+        )
+    if not board.task_ids:
+        return (
+            f'<div class="pm-card">{head}<p class="pm-empty">No task in this view '
+            "yet. Pick another therapeutic area or task.</p></div>"
+        )
+    ranked = _ranked_html(ranked_table(rows, by_id, board))
+    return (
+        f'<div class="pm-card">{head}{ranked}</div>'
+        + RANKED_NOTE
+        + _per_task_details(per_task_table(rows, by_id, board), by_id, board)
+    )
+
+
+def history_html(df: pd.DataFrame, version: Version = CURRENT) -> str:
+    """The release notes: every board version, what changed, and its board.
+
+    A version other than the one on screen links to its board, so a closed
+    version stays one click away now that no menu lists them.
+    """
+    cite = ", ".join(
+        part
+        for part in (f"PRIMO leaderboard v{version.number}", updated_on(df), SPACE_URL)
+        if part
+    )
+    items = []
+    for listed in VERSIONS:
+        state = "current" if listed == CURRENT else "closed"
+        span = (
+            f"since {listed.opened}"
+            if listed == CURRENT
+            else f"{listed.opened} to {_closed_on(listed)}"
+        )
+        link = (
+            ""
+            if listed == version
+            else f'<a target="_self" href="{_href("tab=leaderboard", listed)}">'
+            "View this board</a>"
+        )
+        items.append(
+            f'<li class="{"pm-on" if listed == version else ""}">'
+            f"<b>v{escape(listed.number)}</b><div>"
+            f'<p class="pm-ver-meta"><span class="pm-chip pm-chip--{state}">{state}'
+            f"</span> {escape(span)} · release {escape(listed.release)}</p>"
+            f"<p>{escape(listed.notes)}</p></div>{link}</li>"
+        )
+    return (
+        '<section class="pm-history" id="pm-history" '
+        'aria-labelledby="pm-history-title"><div>'
+        '<h2 class="pm-title" id="pm-history-title">Release notes</h2>'
+        '<p class="pm-history-sub">What changed in each board version. A closed '
+        "version keeps its board, read-only. To cite a rank: "
+        f"<span>{escape(cite)}</span>.</p></div><ol>{''.join(items)}</ol></section>"
+    )
+
+
+def cta_html(boards: list[Board], version: Version = CURRENT) -> str:
+    """The closing panel: an open call for cohorts, with examples of what is missing."""
+    gaps = [b.name for group in SECTIONS for b in open_in_group(boards, group)]
+    missing = ""
+    if gaps:
+        listed = gaps[0] if len(gaps) == 1 else f"{', '.join(gaps[:-1])} and {gaps[-1]}"
+        missing = f"Still missing, for example: {listed}. "
+    return (
+        '<section class="pm-ask" aria-labelledby="pm-ask-title"><div>'
+        '<p class="pm-label">Help us grow PRIMO</p>'
+        '<h2 id="pm-ask-title">Which cohort should PRIMO cover next?</h2></div>'
+        '<div class="pm-ask-go"><p>PRIMO is open to any omics layer and any disease '
+        f"area. {escape(missing)}Bring a cohort, or propose a task on the cohorts "
+        "already here.</p>"
+        f'<a class="pm-btn" target="_self" href="{_href("tab=contribute", version)}">'
+        "Contribute</a>"
+        "</div></section>"
     )
