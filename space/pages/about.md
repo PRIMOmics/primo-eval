@@ -90,7 +90,8 @@ the archive but never the accession, as publishing the study id behind a
 
 ## Cite PRIMO
 
-Cite the benchmark paper: <https://openreview.net/forum?id=v2SA8gHwqo>
+Cite this website and the board version that you used. The BibTeX entry is
+under the ranking, on the **Leaderboard** page.
 
 Want to add a cohort, propose a task on the cohorts already here, open a new
 modality or therapeutic area, or work with us on the methodology? The
