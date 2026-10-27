@@ -238,6 +238,18 @@ def test_a_pill_clicked_before_the_page_loads_changes_nothing():
     assert app._render_view(None, "bulk-rna", ALL, ALL, "show", "show") == "skip"
 
 
+def test_the_public_tasks_pill_shows_only_when_a_task_is_public(
+    monkeypatch, registry, boards
+):
+    private = {task_id: {**task, "public": False} for task_id, task in registry.items()}
+
+    shown = _init(monkeypatch, registry, boards)[8]
+    hidden = _init(monkeypatch, private, boards)[8]
+
+    assert shown["visible"] is True
+    assert hidden["visible"] is False
+
+
 def test_submission_also_saves_its_hvg_concatenation_entry(monkeypatch):
     persisted = []
 

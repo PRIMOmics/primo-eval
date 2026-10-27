@@ -135,9 +135,9 @@ The tasks listed in `public_tasks/manifest.yaml` of the data repo have
 downloadable labels. They are tagged **Public** in the task tables and are
 scored like every other task.
 
-The **Public tasks** pill re-ranks the view on its private tasks only when set
-to **Hide**, without a page reload. It shows every task by default. The Tasks page
-always shows every task.
+When the version has public tasks, a **Public tasks** pill shows. Set to
+**Hide**, it re-ranks the view on its private tasks only, without a page reload.
+It shows every task by default. The Tasks page always shows every task.
 
 ## Make a submission
 

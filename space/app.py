@@ -622,7 +622,7 @@ def _init(request: gr.Request):
         gr.Radio(choices=area_choices(by_id, modality), value=area),
         gr.Radio(choices=category_choices(by_id, modality), value=category),
         gr.Radio(value=hvg),
-        gr.Radio(value=public),
+        gr.Radio(value=public, visible=any(t.get(PUBLIC) for t in by_id.values())),
         state,
         render_tasks(by_id),
         _about_text(by_id),
@@ -668,6 +668,7 @@ def build_demo() -> gr.Blocks:
                             TOGGLE_CHOICES,
                             value=SHOW,
                             label="Public tasks",
+                            visible=False,
                             elem_classes=["pm-seg", "pm-seg--minor"],
                         )
                     board_html = gr.HTML(padding=False)
