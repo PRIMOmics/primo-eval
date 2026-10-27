@@ -239,7 +239,7 @@ footer { display: none !important; }
 #pm-site .pm-empty { margin: 0; padding: 22px 18px; font-size: 15px; color: var(--pm-ink-2); }
 
 /* the window of the Cite button, in the top bar */
-#pm-cite-dialog { width: min(640px, calc(100vw - 32px)); margin: auto !important; }
+#pm-cite-dialog { width: min(640px, calc(100vw - 32px)); }
 #pm-cite-dialog b { color: var(--pm-ink); }
 #pm-cite-dialog pre { margin: 14px 0 0; overflow-x: auto; font: 12.5px/1.55 var(--pm-f-mono); white-space: pre; }
 
@@ -376,8 +376,9 @@ footer { display: none !important; }
 #pm-site #pm-evaluate { width: 100%; justify-content: center; min-height: 46px; margin-top: 10px; border-radius: 999px !important; border: 2px solid var(--pm-btn-edge) !important; background: var(--pm-accent) !important; color: var(--pm-accent-ink) !important; font: 600 15px/1.3 var(--pm-f-body) !important; }
 #pm-site #pm-evaluate:hover { filter: brightness(1.12); }
 
-/* evaluation confirmation */
+/* the windows: evaluation confirmation and Cite */
 .pm-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--pm-line); border-radius: var(--pm-r-card); background: var(--pm-surface); color: var(--pm-ink); box-shadow: 0 24px 64px rgb(19 39 63 / .24); }
+#pm-site .pm-dialog { margin: auto !important; }
 .pm-dialog::backdrop { background: rgb(19 39 63 / .45); }
 .pm-dialog-surface { padding: 24px; }
 .pm-dialog h2 { margin: 8px 0 0; font: 700 1.35rem/1.2 var(--pm-f-display); letter-spacing: -.02em; color: var(--pm-ink); }

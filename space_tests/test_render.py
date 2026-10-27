@@ -599,6 +599,12 @@ def test_evaluation_confirmation_requires_an_explicit_choice():
     assert "update the public leaderboards" in html
 
 
+def test_both_windows_open_in_the_middle_of_the_screen():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site .pm-dialog { margin: auto !important; }" in css
+
+
 def test_evaluation_status_announces_that_scoring_is_in_progress():
     html = evaluation_status()
 
