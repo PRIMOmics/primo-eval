@@ -1,6 +1,6 @@
 PRIMO is an open benchmark, and it is **deliberately incomplete**. The
 **Leaderboard** page shows how far it reaches today, and its last panel names
-the gaps.
+a few of the gaps.
 
 PRIMO was started by **Scienta** and **Hugging Face**. The intent is community governance; how
 that actually works is part of what the first partners will define.
@@ -33,9 +33,9 @@ much as data does.
 
 ## Add a modality or a therapeutic area
 
-The last panel of the **Leaderboard** page names the omics layers and clinical
-areas PRIMO does not reach yet. Read them as gaps waiting for someone rather than as a roadmap we
-are already working through. Opening one takes a single cohort with clinical
+The last panel of the **Leaderboard** page names a few omics layers and clinical
+areas PRIMO does not reach yet. Any other one is welcome too. Read them as gaps
+waiting for someone rather than as a roadmap we are already working through. Opening one takes a single cohort with clinical
 labels, and not a whole atlas.
 
 [Claim an open board](mailto:karim.elkanbi@scientalab.com?subject=PRIMO%20open%20board&body=Board%20I%20want%20to%20open%3A%0A%0AWhat%20I%20can%20bring%20%28cohort%2C%20labels%2C%20licence%29%3A%0A)
