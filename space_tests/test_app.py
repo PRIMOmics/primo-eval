@@ -250,6 +250,13 @@ def test_the_public_tasks_pill_shows_only_when_a_task_is_public(
     assert hidden["visible"] is False
 
 
+def test_the_page_loads_no_stylesheet_from_another_site():
+    css = Path(app.CSS_PATH).read_text()
+
+    assert 'rel="stylesheet"' not in app.PAGE_HEAD
+    assert "@import" not in css
+
+
 def test_submission_also_saves_its_hvg_concatenation_entry(monkeypatch):
     persisted = []
 

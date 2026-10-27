@@ -7,8 +7,8 @@
 
 /* ---------- tokens: PRIMO marine and coral ---------- */
 :root {
-  --pm-f-display: "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --pm-f-body: "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pm-f-display: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pm-f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --pm-f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --pm-r-card: 16px;
   --pm-bg: #EEF0F7; --pm-surface: #F8F9FC; --pm-surface-2: #E2E6F3;

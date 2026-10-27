@@ -124,9 +124,6 @@ PAGE_HEAD = f"""
 <meta name="twitter:title" content="PRIMO Benchmark" />
 <meta name="twitter:description" content="A blind benchmark for omics foundation models." />
 <meta name="twitter:image" content="{SOCIAL_PREVIEW_URL}" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Outfit:wght@300..800&display=swap">
 """
 
 TOKEN = os.environ.get("HF_TOKEN")
@@ -137,9 +134,7 @@ SHOW = "show"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
 
-THEME = gr.themes.Base(
-    font=["Outfit", "sans-serif"], font_mono=["IBM Plex Mono", "monospace"]
-)
+THEME = gr.themes.Base()
 
 VIEW_URL_JS = """
 (modality, area, task, hvg, pub) => {
