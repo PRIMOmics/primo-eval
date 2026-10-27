@@ -270,6 +270,14 @@ def test_a_baseline_that_leads_a_task_shows_its_chip_in_best(registry, flagged_r
     assert "pca-50 (baseline)</td>" not in per_task
 
 
+def test_the_submissions_header_says_how_the_count_works(registry, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+
+    ranked = _ranked(_view(registry, df))
+
+    assert "the most times one task of this model was submitted" in ranked
+
+
 # --------------------------------------------------------- the toggle pills
 def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(registry, flagged_results):
     df = flagged_results(

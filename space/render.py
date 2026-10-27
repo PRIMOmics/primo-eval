@@ -417,7 +417,9 @@ RANKED_NOTES = {"Model": "paper linked when given"}
 RANKED_HINTS = {
     "Elo": f"The {ELO_ANCHOR_MODEL} baseline sits at 1000.",
     "Mean rank": "Lower is better.",
-    "Submissions count": "Submissions: how many times the model was submitted.",
+    "Submissions count": (
+        "Submissions: the most times one task of this model was submitted."
+    ),
 }
 SHORT_METRICS = {
     "Centered Spearman score": "centered Spearman",
