@@ -451,6 +451,8 @@ def test_pages_carry_no_view_switch(registry):
 def test_the_closing_panel_names_the_open_slices_and_links_contribute(boards):
     html = cta_html(boards)
 
+    assert "PRIMO is open to any omics layer and any disease area." in html
+    assert "Still missing, for example: " in html
     assert "Proteomics" in html and "Neuroscience" in html
     assert 'href="?tab=contribute"' in html
 

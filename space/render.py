@@ -852,18 +852,19 @@ def history_html(df: pd.DataFrame, version: Version = CURRENT) -> str:
 
 
 def cta_html(boards: list[Board], version: Version = CURRENT) -> str:
-    """The closing panel: what PRIMO does not cover yet, and how to add it."""
+    """The closing panel: an open call for cohorts, with examples of what is missing."""
     gaps = [b.name for group in SECTIONS for b in open_in_group(boards, group)]
     missing = ""
     if gaps:
         listed = gaps[0] if len(gaps) == 1 else f"{', '.join(gaps[:-1])} and {gaps[-1]}"
-        missing = f"Not covered yet: {listed}. "
+        missing = f"Still missing, for example: {listed}. "
     return (
         '<section class="pm-ask" aria-labelledby="pm-ask-title"><div>'
         '<p class="pm-label">Help us grow PRIMO</p>'
         '<h2 id="pm-ask-title">Which cohort should PRIMO cover next?</h2></div>'
-        f'<div class="pm-ask-go"><p>{escape(missing)}Bring a cohort, or propose a task '
-        "on the cohorts already here.</p>"
+        '<div class="pm-ask-go"><p>PRIMO is open to any omics layer and any disease '
+        f"area. {escape(missing)}Bring a cohort, or propose a task on the cohorts "
+        "already here.</p>"
         f'<a class="pm-btn" target="_self" href="{_href("tab=contribute", version)}">'
         "Contribute</a>"
         "</div></section>"
