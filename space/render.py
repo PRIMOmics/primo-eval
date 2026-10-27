@@ -660,7 +660,9 @@ def _ranked_header(index: int, col: str, numeric: bool) -> str:
         name, note = RANKED_LABELS.get(col, col), RANKED_NOTES.get(col, "")
     align = " pm-r" if numeric else ""
     small = f"<small>{escape(note)}</small>" if note else ""
-    hint = escape(f"Sort by {name}. {RANKED_HINTS.get(col, '')}".strip(), quote=True)
+    hint = escape(
+        f"Sort by {name.rstrip('.')}. {RANKED_HINTS.get(col, '')}".strip(), quote=True
+    )
     return (
         f'<th class="pm-sort{align}" data-sort-index="{index}" tabindex="0" '
         f'role="button" aria-sort="none" title="{hint}">{escape(name)}{small}</th>'

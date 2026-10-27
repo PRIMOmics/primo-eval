@@ -276,6 +276,7 @@ def test_the_submissions_header_says_how_the_count_works(registry, results):
     ranked = _ranked(_view(registry, df))
 
     assert "the most times one task of this model was submitted" in ranked
+    assert 'title="Sort by Subm. Submissions:' in ranked
 
 
 # --------------------------------------------------------- the toggle pills
