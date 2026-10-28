@@ -19,6 +19,11 @@ dependencies = [
     "scipy",
 ]
 
+[project.urls]
+Repository = "https://github.com/PRIMOmics/primo-eval"
+Issues = "https://github.com/PRIMOmics/primo-eval/issues"
+Leaderboard = "https://huggingface.co/spaces/PRIMOmics/primo-eval"
+
 [project.scripts]
 primo = "primomics.cli:main"
 

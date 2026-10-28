@@ -18,7 +18,7 @@ thumbnail: https://huggingface.co/spaces/PRIMOmics/primo-eval/resolve/main/asset
 
 PRIMO grades how well a model turns a patient's omics data into a useful
 **patient embedding**. You select one modality, embed its datasets, and upload
-**one** file; a fixed probe scores each hidden task, and the results roll up into a blind,
+**one** file; a fixed probe scores each task, and the results roll up into a blind,
 per-category leaderboard. The datasets are opaque (`d002`, `d003`…) and you never
 see the disease, tissue, or target, which leaves you grading the *embedding*
 itself with no room for per-task tuning.
@@ -86,7 +86,7 @@ exactly one embedding for every unique `sample_id`, not one embedding per cell.
 
 ## How it works
 
-Each dataset is embedded once and scored on every hidden task defined for it.
+Each dataset is embedded once and scored on every task defined for it.
 Learned embedding rows are scaled to unit length; gene-space baselines keep
 their row scale. Then, per task: standardise on the outer training fold, fit
 logistic regression (classification) or ridge regression with the penalty
