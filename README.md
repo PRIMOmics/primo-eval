@@ -1,8 +1,8 @@
 # 🧬 primo-eval
 
 PRIMO is a benchmark evaluating representations of omics foundation models on
-real-world clinical tasks such as treatment outcome, clinical score, endotype and
-perturbation response.
+real-world drug development tasks such as treatment outcome, clinical score,
+endotype and perturbation response.
 
 You embed each sample of the PRIMO datasets with your model. A fixed probe, the same
 for every model, then predicts the target of each task from your embeddings, so the

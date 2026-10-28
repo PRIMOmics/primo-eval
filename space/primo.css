@@ -15,7 +15,7 @@
   --pm-ink: #0D1B62; --pm-ink-2: #2E3A73; --pm-ink-3: #565F8C; --pm-line: #CDD3EA;
   --pm-head: #0D1B62; --pm-accent: #162DA3; --pm-accent-ink: #FFFFFF; --pm-btn-edge: #162DA3;
   --pm-accent-2: #3F53B5; --pm-accent-text: #B5532F;
-  --pm-mark: #FD7E56; --pm-mark-muted: #A5ACCB;
+  --pm-mark: #FD7E56; --pm-mark-muted: #A5ACCB; --pm-mark-ink: #0D1B62;
   --pm-panel: #0D1B62; --pm-panel-line: #3F53B5; --pm-panel-ink: #FFFFFF; --pm-panel-ink-2: #BCC3EA;
   color-scheme: light;
 }
@@ -116,7 +116,7 @@ footer { display: none !important; }
 #pm-site .pm-stats li { margin: 0; font: 500 14px/1 var(--pm-f-mono); color: var(--pm-ink-2); border: 1px solid var(--pm-line); background: var(--pm-surface); padding: 8px 12px; border-radius: 999px; }
 #pm-site .pm-stats li::marker { content: none; }
 .pm-stats b { color: var(--pm-ink); font-weight: 600; }
-.pm-art-wrap { justify-self: end; width: 100%; max-width: 520px; }
+.pm-art-wrap { justify-self: end; width: 100%; max-width: 557px; }
 .pm-art { padding: 14px; border: 1px solid var(--pm-line); border-radius: 14px; background: var(--pm-surface); }
 .pm-hero-art { display: block; width: 100%; height: auto; }
 .pm-hero-art text { font-family: var(--pm-f-body); }
@@ -132,7 +132,7 @@ footer { display: none !important; }
 .pm-art-line { fill: none; stroke: var(--pm-ink-3); stroke-width: 1.2; }
 .pm-art-head { fill: var(--pm-ink-3); }
 .pm-art-pill { fill: var(--pm-surface-2); stroke: var(--pm-line); stroke-width: 1; }
-@media (max-width: 1000px) { .pm-hero { grid-template-columns: 1fr; } .pm-art-wrap { justify-self: start; max-width: 520px; } }
+@media (max-width: 1000px) { .pm-hero { grid-template-columns: 1fr; } .pm-art-wrap { justify-self: start; max-width: 557px; } }
 
 /* ---------- view pills: Gradio radios drawn as segmented pills ---------- */
 #pm-site .pm-board-sub { margin: 40px 0 14px; padding-top: 22px; border-top: 1px solid var(--pm-line); font-size: 14.5px; color: var(--pm-ink-3); }
@@ -168,7 +168,7 @@ footer { display: none !important; }
 #pm-site .pm-seg label.selected, #pm-site .pm-seg label:has(input:checked) { background: var(--pm-ink) !important; color: var(--pm-bg) !important; }
 #pm-site .pm-seg input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
 #pm-site .pm-seg label > span { margin: 0 !important; color: inherit !important; font: inherit !important; }
-#pm-site .pm-seg--main label { font-size: 16px !important; font-weight: 600 !important; padding: 12px 20px !important; min-height: 46px; }
+#pm-site .pm-seg--main label.selected, #pm-site .pm-seg--main label:has(input:checked) { background: var(--pm-mark) !important; color: var(--pm-mark-ink) !important; }
 #pm-site .pm-seg--main [data-testid="block-info"] { color: var(--pm-ink) !important; }
 #pm-site .pm-seg--minor label { font-size: 12.5px !important; padding: 6px 10px !important; min-height: 28px; }
 #pm-site .pm-seg--minor [data-testid="block-info"] { font-style: italic !important; }
