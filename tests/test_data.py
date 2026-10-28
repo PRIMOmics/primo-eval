@@ -181,6 +181,18 @@ def test_a_failed_hub_call_is_an_evaluator_error(fake_hub, tmp_path, monkeypatch
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
 
 
+@pytest.mark.parametrize("folder", ["read-only", "read-only/new"])
+def test_a_data_folder_that_cannot_be_written_raises(fake_hub, tmp_path, folder):
+    (tmp_path / "read-only").mkdir()
+    (tmp_path / "read-only").chmod(0o500)
+
+    with pytest.raises(SubmissionError, match="cannot write to"):
+        data.download(tmp_path / folder, "bulk-rna", tasks=PUBLIC_TASKS)
+
+    (tmp_path / "read-only").chmod(0o700)
+    assert fake_hub.requested == []
+
+
 def test_a_dataset_missing_on_the_hub_raises(fake_hub, tmp_path):
     del fake_hub.files["d902/expression.h5ad"]
 

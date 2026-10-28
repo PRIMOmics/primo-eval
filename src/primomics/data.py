@@ -11,6 +11,7 @@ before anything is scored or sent.
 
 import json
 import logging
+import os
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -233,7 +234,12 @@ def download(
     Hub is reported in ``unlabelled`` rather than failing the download.
     """
     data_dir = Path(data_dir)
-    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise SubmissionError(f"cannot write to {data_dir}: {error}") from error
+    if not os.access(data_dir, os.W_OK):
+        raise SubmissionError(f"cannot write to {data_dir}: it is read-only")
     api = HfApi()
     with _hub_errors():
         revision = api.dataset_info(DATA_REPO, revision=revision).sha
