@@ -150,6 +150,13 @@ def test_read_lock_before_any_download_is_empty(tmp_path):
     assert data.read_lock(tmp_path) == {}
 
 
+def test_a_damaged_lock_says_how_to_repair_it(fake_hub, tmp_path):
+    (tmp_path / data.LOCK_FILE).write_text('{"files": ')
+
+    with pytest.raises(SubmissionError, match="delete it, then run primo download"):
+        data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
+
+
 def test_public_tasks_without_labels_are_logged(fake_hub, tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)

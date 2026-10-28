@@ -158,7 +158,12 @@ def read_lock(data_dir: str | Path) -> dict:
     path = Path(data_dir) / LOCK_FILE
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except ValueError as error:
+        raise SubmissionError(
+            f"{path} is damaged: delete it, then run primo download again"
+        ) from error
 
 
 def _update_lock(data_dir: Path, revision: str, files: Iterable[RepoFile]) -> None:
