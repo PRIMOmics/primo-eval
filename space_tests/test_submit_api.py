@@ -1,7 +1,6 @@
 """Tests of the ``/submit`` endpoint that ``primo submit`` calls (no network)."""
 
 import ast
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
@@ -10,10 +9,10 @@ from types import SimpleNamespace
 
 import app
 import gradio as gr
+import httpx
 import huggingface_hub
 import pandas as pd
 import pytest
-import requests
 from gradio_client import Client, handle_file
 from huggingface_hub.utils import HfHubHTTPError
 from submit_api import (
@@ -199,18 +198,16 @@ def hub(monkeypatch):
     known = {**ACCOUNTS, SPACE_TOKEN: "space-owner"}
     hub = SimpleNamespace(tokens=[], answer=HTTPStatus.OK)
 
-    def send(session, request, **kwargs):
+    def send(client, request, **kwargs):
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         hub.tokens.append(token)
         if isinstance(hub.answer, Exception):
             raise hub.answer
-        response = requests.Response()
-        response.status_code = hub.answer
-        response._content = json.dumps({"name": known.get(token)}).encode()
-        response.request, response.url = request, request.url
-        return response
+        return httpx.Response(
+            hub.answer, json={"name": known.get(token)}, request=request
+        )
 
-    monkeypatch.setattr(requests.Session, "send", send)
+    monkeypatch.setattr(httpx.Client, "send", send)
     return hub
 
 
@@ -235,8 +232,8 @@ def test_only_a_token_string_reaches_whoami(hub, token):
         (HTTPStatus.FORBIDDEN, REFUSED),
         (HTTPStatus.TOO_MANY_REQUESTS, ERROR),
         (HTTPStatus.SERVICE_UNAVAILABLE, ERROR),
-        (requests.ConnectionError("no network"), ERROR),
-        (requests.ReadTimeout("too slow"), ERROR),
+        (httpx.ConnectError("no network"), ERROR),
+        (httpx.ReadTimeout("too slow"), ERROR),
     ],
 )
 def test_only_a_refused_token_is_the_callers_fault(hub, capsys, caplog, answer, status):
@@ -348,8 +345,8 @@ def test_gradio_refuses_a_marked_path_that_was_not_uploaded(served, space, tmp_p
     call = f"{served}gradio_api/call/submit"
 
     data = list({**FIELDS, "submission_path": marked}.values())
-    event = requests.post(call, json={"data": data}, timeout=30).json()["event_id"]
-    answer = requests.get(f"{call}/{event}", timeout=30).text
+    event = httpx.post(call, json={"data": data}, timeout=30).json()["event_id"]
+    answer = httpx.get(f"{call}/{event}", timeout=30).text
 
     assert "event: error" in answer
     assert space.whoami == space.scored == []

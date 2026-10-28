@@ -146,7 +146,10 @@ SHOW = "show"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
 
-THEME = gr.themes.Base()
+THEME = gr.themes.Base(
+    font=[gr.themes.LocalFont("IBM Plex Sans", weights=(400, 700)), "sans-serif"],
+    font_mono=[gr.themes.LocalFont("IBM Plex Mono", weights=(400, 700)), "monospace"],
+)
 
 VIEW_URL_JS = """
 (modality, area, task, hvg, pub) => {
@@ -686,14 +689,7 @@ def _init(request: gr.Request):
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(
-        title="PRIMO Benchmark",
-        theme=THEME,
-        head=PAGE_HEAD,
-        css_paths=[CSS_PATH],
-        js=TABLE_SORT_JS,
-        fill_width=True,
-    ) as demo:
+    with gr.Blocks(title="PRIMO Benchmark", fill_width=True) as demo:
         page_state = gr.State(None)
         with gr.Column(elem_id="pm-site"):
             nav = gr.HTML(padding=False)
@@ -881,4 +877,8 @@ if __name__ == "__main__":
         ssr_mode=False,
         allowed_paths=ALLOWED_PATHS,
         max_file_size=MAX_FILE_SIZE,
+        theme=THEME,
+        head=PAGE_HEAD,
+        css_paths=[CSS_PATH],
+        js=TABLE_SORT_JS,
     )

@@ -5,5 +5,5 @@ joblib==1.6.0
 scikit-learn==1.9.1
 scipy==1.18.1
 pyyaml
-huggingface_hub<1.0
+huggingface_hub>=1.16,<2
 audioop-lts; python_version >= "3.13"

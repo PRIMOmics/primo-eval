@@ -607,6 +607,18 @@ def test_both_windows_open_in_the_middle_of_the_screen():
     assert "#pm-site .pm-dialog { margin: auto !important; }" in css
 
 
+def test_links_keep_no_padding_from_the_gradio_html_style():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site :where(.gradio-style) a { padding: 0; }" in css
+
+
+def test_links_written_as_code_keep_their_underline():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site .prose a > code { display: inline; }" in css
+
+
 def test_the_modality_pills_have_the_size_of_the_others_in_coral():
     css = Path(render.__file__).with_name("primo.css").read_text()
 
