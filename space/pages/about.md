@@ -117,7 +117,7 @@ modality or therapeutic area, or work with us on the methodology? The
 
 ## Links
 
-- 🌐 **Website**: [primomics.org](http://primomics.org/)
+- 🌐 **Website**: [primomics.org](https://primomics.org/)
 - 📦 **Data**: [PRIMOmics/primo](https://huggingface.co/datasets/PRIMOmics/primo)
 - 📄 **Paper**: [OpenReview](https://openreview.net/forum?id=v2SA8gHwqo)
 - 💬 **Questions**: [karim.elkanbi@scientalab.com](mailto:karim.elkanbi@scientalab.com)

@@ -37,7 +37,7 @@ that slice. Task categories deliberately get none, because a
 category is pinned to a single metric, so an open one would advertise a probe
 that does not exist.
 
-🌐 Website: http://primomics.org/ ·
+🌐 Website: https://primomics.org/ ·
 📦 Data: https://huggingface.co/datasets/PRIMOmics/primo
 
 ## What's in the data
@@ -154,6 +154,10 @@ python quickstart.py --modality bulk-rna --out submission.parquet
 ```
 
 ## Run the scorer locally
+
+This needs read access to the private labels, so only the admins can run it. To
+score the public tasks, use `primo evaluate`
+([primo-eval](https://github.com/PRIMOmics/primo-eval)).
 
 ```bash
 pip install -r requirements.txt

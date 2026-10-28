@@ -46,11 +46,13 @@ Founding partners shape PRIMO rather than just appear on it: a voice on the
 methodology, co-signature on what we publish, and early access to the results.
 
 [Talk to us about partnership](mailto:karim.elkanbi@scientalab.com?subject=PRIMO%20founding%20partner&body=Organisation%3A%0A%0AWhat%20we%20would%20bring%20to%20PRIMO%3A%0A%0AWhat%20we%20would%20want%20from%20it%3A%0A)
-· [primomics.org](http://primomics.org/)
+· [primomics.org](https://primomics.org/)
 
 ## Smaller ways in
 
 - **Question the method.** Open a thread in the Space's **Community** tab.
+- **Report a bug or fix one.** Open an issue or a pull request on
+  [GitHub](https://github.com/PRIMOmics/primo-eval).
 - **Submit a model.** Baselines are on the leaderboard already; beat them.
 - **Read the paper**: [OpenReview](https://openreview.net/forum?id=v2SA8gHwqo)
 - **Look at the data**: [PRIMOmics/primo](https://huggingface.co/datasets/PRIMOmics/primo)

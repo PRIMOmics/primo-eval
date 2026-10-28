@@ -21,6 +21,11 @@ python quickstart.py --modality bulk-rna --out submission.parquet
 2. **Embed that modality** → build **one** file: `dataset_id`, `sample_id`, then one column per embedding dim (`e0`, `e1`, …). CSV / TSV / Parquet, or NPZ.
 3. **Sign in, fill the form, and hit Evaluate.** Add an institution for group submissions, check **Submitted by the model's authors** when applicable, and provide a paper link to make the model name clickable. A fixed task probe scores each task (AUROC, Pearson or centered Spearman), reported per task category in its native metric.
 
+### Or with the command line
+
+The [`primo`](https://github.com/PRIMOmics/primo-eval) command checks your file,
+scores the public tasks on your computer, and submits it.
+
 ### Example file
 
 ```
