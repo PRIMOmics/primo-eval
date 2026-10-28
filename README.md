@@ -188,6 +188,9 @@ first, as on the leaderboard. The datasets of the modality that are missing from
 file are listed too: on submit, their tasks count as missing. `results.json` holds
 every score, with the version of `primomics` and the hashes of the data files.
 
+On your computer, an AUROC can differ from the leaderboard by a few thousandths,
+because two computers do not round numbers in exactly the same way.
+
 This step is optional, and it needs no account. It finds the errors in your file
 before you submit: when a check fails, the command says what to fix and exits with
 code 1.
