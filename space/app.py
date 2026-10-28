@@ -75,7 +75,6 @@ from evaluator import (
 )
 from leaderboard import RESERVED_COLUMNS, source_repositories
 from render import (
-    BOARD_SUB,
     CREDIT,
     VERSION_PARAM,
     cta_html,
@@ -696,7 +695,6 @@ def build_demo() -> gr.Blocks:
             with gr.Tabs(elem_id="pm-pages") as pages:
                 with gr.Tab("Leaderboard", id="leaderboard"):
                     hero = gr.HTML(padding=False)
-                    gr.HTML(BOARD_SUB, padding=False)
                     with gr.Row(elem_id="pm-controls"):
                         modality_f = gr.Radio(
                             label="Modality", elem_classes=["pm-seg", "pm-seg--main"]

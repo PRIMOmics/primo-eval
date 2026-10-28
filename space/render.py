@@ -404,10 +404,12 @@ LEDE = (
     "prognosis, so the score measures the embedding."
 )
 RANKED_NOTE = (
-    '<p class="pm-note">We score zero-shot representations, so a score is not the '
-    "best a model can reach. Only models that covered every task scored by the "
-    f"<code>{ELO_ANCHOR_MODEL}</code> baseline are ranked. <code>+ HVG</code> rows "
-    "concatenate a model with the baseline's features.</p>"
+    '<p class="pm-note">Models are ranked by Elo over the tasks of the view, '
+    f"anchored on the <code>{ELO_ANCHOR_MODEL}</code> baseline at 1000. Only models "
+    "that covered every task scored by this baseline are ranked. Task columns show "
+    "the mean score, each in its own metric. <code>+ HVG</code> rows concatenate a "
+    "model with the baseline's features. We score zero-shot representations, so a "
+    "score is not the best a model can reach.</p>"
 )
 N_TOP = 3
 ORDINAL_SUFFIXES = {1: "st", 2: "nd", 3: "rd"}
@@ -427,11 +429,6 @@ SHORT_METRICS = {
 }
 CATEGORY_HEADER = re.compile(r"^(?P<name>.+) \((?P<metric>[^()]+)\)$")
 STRABLE_URL = "https://gblayer.github.io/strable-leaderboard/"
-BOARD_SUB = (
-    '<p class="pm-board-sub">Models are ranked by Elo over the tasks of the view, '
-    f"anchored on the {ELO_ANCHOR_MODEL} baseline at 1000. Task columns show the "
-    "mean score, each in its own metric.</p>"
-)
 ART_GENES = (0.55, 0.9, 0.4, 0.75, 0.35, 0.95, 0.5, 0.8, 0.45, 0.7, 0.3, 0.85, 0.6, 0.4)
 ART_EMBEDDING = (0.7, 1.0, 0.6, 0.9, 0.75, 0.95)
 ART_LAYERS = ((4, 132), (5, 150), (3, 168))

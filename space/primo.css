@@ -135,8 +135,7 @@ footer { display: none !important; }
 @media (max-width: 1000px) { .pm-hero { grid-template-columns: 1fr; } .pm-art-wrap { justify-self: start; max-width: 557px; } }
 
 /* ---------- view pills: Gradio radios drawn as segmented pills ---------- */
-#pm-site .pm-board-sub { margin: 40px 0 14px; padding-top: 22px; border-top: 1px solid var(--pm-line); font-size: 14.5px; color: var(--pm-ink-3); }
-#pm-controls { display: block !important; margin: 0 0 20px; }
+#pm-controls { display: block !important; margin: 40px 0 20px; padding-top: 22px; border-top: 1px solid var(--pm-line); }
 #pm-controls > .form {
   display: flex !important; flex-wrap: wrap !important; align-items: center; gap: 12px 22px !important;
   width: 100% !important; background: transparent !important; border: 0 !important; box-shadow: none !important; overflow: visible !important;
