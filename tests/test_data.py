@@ -256,6 +256,17 @@ def test_check_reports_non_finite_values(local_data, tmp_path):
     assert verdicts["d902"] == "contains NaN or inf values"
 
 
+def test_check_ignores_non_finite_values_outside_the_dataset(local_data, tmp_path):
+    blocks = signal_blocks()
+    ids, matrix = blocks["d902"]
+    blocks["d902"] = ([*ids, "extra"], np.vstack([matrix, np.full((1, 4), np.nan)]))
+    path = write_submission(tmp_path / "sub.parquet", blocks)
+
+    verdicts = data.check_submission(path, local_data, "bulk-rna")
+
+    assert verdicts["d902"] == data.OK
+
+
 def test_check_reports_duplicate_samples(local_data, tmp_path):
     ids = BULK_SAMPLES["d902"]
     blocks = {"d902": ([*ids, ids[0]], np.ones((len(ids) + 1, 2)))}

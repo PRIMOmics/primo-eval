@@ -326,13 +326,13 @@ def _check_block(
         frame = to_embedding_frame(block)
     except SubmissionError as error:
         return str(error)
-    if not np.isfinite(frame.to_numpy()).all():
-        return "contains NaN or inf values"
     expected = sample_ids(data_dir, entry)
     present = set(frame.index)
     missing = [sample for sample in expected if sample not in present]
     if missing:
         return f"{len(missing)}/{len(expected)} samples missing, e.g. {missing[:5]}"
+    if not np.isfinite(frame.loc[expected].to_numpy()).all():
+        return "contains NaN or inf values"
     extra = len(present - set(expected))
     if extra:
         logger.warning(
