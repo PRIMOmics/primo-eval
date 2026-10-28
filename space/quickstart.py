@@ -25,7 +25,7 @@ from huggingface_hub import hf_hub_download, snapshot_download
 from sklearn.decomposition import PCA
 
 PUBLIC_REPO = "PRIMOmics/primo"
-DATA_REVISION = "0f452b2fc84e544fb1a1fc5bd42017482e07b43c"
+DATA_REVISION = "4b5aaaf9225bfaec61565c8c17232652845bb07f"
 MANIFEST_FILENAME = "datasets.yaml"
 MODALITIES = {"bulk-rna": "bulk RNA", "single-cell-rna": "Single Cell RNA"}
 
