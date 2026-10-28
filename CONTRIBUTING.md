@@ -3,6 +3,19 @@
 `primomics` computes the scores of the PRIMO benchmark. Scores must stay comparable
 over time, so a PR that changes a score follows stricter rules than other PRs.
 
+## How to contribute
+
+- To report a bug or ask a question about `primo`, open an issue.
+- To fix something, open a pull request from a fork.
+- To propose a cohort, a task or a modality, use the
+  [Contribute page](https://huggingface.co/spaces/PRIMOmics/primo-eval?tab=contribute)
+  of the leaderboard.
+- To add a model, submit it to the leaderboard (see `README.md`). Do not open a pull
+  request.
+- To report a security problem, see `SECURITY.md`.
+
+Everyone follows the code of conduct (`CODE_OF_CONDUCT.md`).
+
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/), then run the same checks as the CI:
@@ -21,6 +34,16 @@ uv run --isolated --no-project --python 3.13 \
 The last command tests the leaderboard Space, in `space/`, with the packages the Space
 runs.
 
+## Roles
+
+- Contributors open issues, and pull requests from a fork. They cannot merge.
+- Maintainers review and merge pull requests. The admins choose the maintainers.
+- Score owners are the maintainers who approve changes to the files that can change
+  a score. `.github/CODEOWNERS` lists these files.
+- Admins manage the access and the settings of the repo. Only admins publish: they
+  create the `v*` tags and the GitHub Releases, deploy the Space, and upload to
+  Hugging Face.
+
 ## Workflow
 
 - `main` is the only long-lived branch. It always passes the CI.
@@ -28,7 +51,10 @@ runs.
   repo, work from a fork.
 - One pull request = one purpose. Prefer several small PRs to one large PR.
 - Every code change comes with a test.
-- A PR needs a review and a green CI before it is merged.
+- A PR needs a green CI and the approval of a maintainer who is not its author.
+  A new commit cancels the approval: the PR then needs a new one.
+- After the approval, the author merges the PR. If the author is a contributor, the
+  maintainer who approved it merges it.
 - PRs are merged with a merge commit, then their branch is deleted.
 - A merge does not deploy the leaderboard Space: see "Deploy the Space" below.
 - Maintainers can split a large change into stacked PRs: each PR targets the branch
@@ -42,6 +68,8 @@ runs.
 
 A score must never change by accident.
 
+- A PR that changes a file listed in `.github/CODEOWNERS` needs the approval of a
+  score owner, even if no score changes.
 - Before you change a score, open an issue to discuss it. This covers the probe, the
   folds, a metric, the normalization, the data version, and any fix that changes a
   score.
@@ -86,9 +114,9 @@ Release steps:
    `uv.lock`. Then open a PR.
 2. After the merge, tag the merge commit `v0.2.0` and create a GitHub Release. Its
    notes start with "Scores change" or "Scores do not change".
-3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`).
-   `primo evaluate` writes this version into `results.json`, so a result made from
-   `main` never carries the number of a release.
+3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`). This
+   change does not need a PR of its own. `primo evaluate` writes this version into
+   `results.json`, so a result made from `main` never carries the number of a release.
 
 ### Board versions
 
@@ -153,8 +181,8 @@ carry none, so this version opens once, by hand:
 
 The leaderboard Space runs the `space/` folder of a release, so the rows of a board
 version all come from the code of that version. After a release that changes
-`space/`, a maintainer with write access to the `PRIMOmics/primo-eval` Space deploys it
-by hand, with their own Hugging Face login (`uv run hf auth login`):
+`space/`, an admin deploys it by hand, with their own Hugging Face login
+(`uv run hf auth login`):
 
 ```bash
 git fetch origin --tags

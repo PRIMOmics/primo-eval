@@ -18,7 +18,7 @@ thumbnail: https://huggingface.co/spaces/PRIMOmics/primo-eval/resolve/main/asset
 
 PRIMO grades how well a model turns a patient's omics data into a useful
 **patient embedding**. You select one modality, embed its datasets, and upload
-**one** file; a fixed probe scores each hidden task, and the results roll up into a blind,
+**one** file; a fixed probe scores each task, and the results roll up into a blind,
 per-category leaderboard. The datasets are opaque (`d002`, `d003`…) and you never
 see the disease, tissue, or target, which leaves you grading the *embedding*
 itself with no room for per-task tuning.
@@ -37,7 +37,7 @@ that slice. Task categories deliberately get none, because a
 category is pinned to a single metric, so an open one would advertise a probe
 that does not exist.
 
-🌐 Website: http://primomics.org/ ·
+🌐 Website: https://primomics.org/ ·
 📦 Data: https://huggingface.co/datasets/PRIMOmics/primo
 
 ## What's in the data
@@ -86,7 +86,7 @@ exactly one embedding for every unique `sample_id`, not one embedding per cell.
 
 ## How it works
 
-Each dataset is embedded once and scored on every hidden task defined for it.
+Each dataset is embedded once and scored on every task defined for it.
 Learned embedding rows are scaled to unit length; gene-space baselines keep
 their row scale. Then, per task: standardise on the outer training fold, fit
 logistic regression (classification) or ridge regression with the penalty
@@ -154,6 +154,10 @@ python quickstart.py --modality bulk-rna --out submission.parquet
 ```
 
 ## Run the scorer locally
+
+This needs read access to the private labels, so only the admins can run it. To
+score the public tasks, use `primo evaluate`
+([primo-eval](https://github.com/PRIMOmics/primo-eval)).
 
 ```bash
 pip install -r requirements.txt

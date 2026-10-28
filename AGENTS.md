@@ -37,7 +37,7 @@ comes with its `oauth` extra, which the login button of the Space needs.
   `EvaluatorError` (we fix it).
 - `tests/`: one test file per module.
 - `space/`: the leaderboard Space, as it runs on Hugging Face. `space/README.md` holds
-  its config. It still has its own scorer, `space/evaluator.py`. Maintainers deploy
+  its config. It still has its own scorer, `space/evaluator.py`. Admins deploy
   a release of it by hand (see `CONTRIBUTING.md`).
 - `space/versions.yaml`: the board versions and the Hub commits each one reads.
   `space/rescore.py` fills the board of a new version from the archived files.

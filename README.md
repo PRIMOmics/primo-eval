@@ -87,8 +87,8 @@ uv run primo download --modality bulk-rna
 The data comes from the
 [`PRIMOmics/primo`](https://huggingface.co/datasets/PRIMOmics/primo) dataset on the
 Hugging Face Hub. It is public, so you need no account. `primo download` fetches
-the commit that the leaderboard scores, into `primo-data/` by default
-(`--data-dir` changes it):
+the commit that the leaderboard scores, into `primo-data/` by default. To use
+another folder, pass the same `--data-dir` to every `primo` command:
 
 - `datasets.yaml` lists every dataset, with its `id`, `modality` and `path`;
 - one `expression.h5ad` per dataset;
@@ -261,7 +261,7 @@ uv run ruff check
 uv run ruff format --check
 ```
 
-The leaderboard Space lives in `space/`. A merge does not deploy it: maintainers
+The leaderboard Space lives in `space/`. A merge does not deploy it: admins
 deploy it by hand (see `CONTRIBUTING.md`). Its tests run in a separate environment,
 with the packages of the Space:
 
@@ -272,7 +272,10 @@ uv run --isolated --no-project --python 3.13 \
   pytest space_tests
 ```
 
-Before you open a pull request, read `CONTRIBUTING.md`.
+## 🤝 Contributing
+
+Bug reports, fixes and ideas are welcome: read `CONTRIBUTING.md`. To report a
+security problem, see `SECURITY.md`.
 
 ## 📄 License
 

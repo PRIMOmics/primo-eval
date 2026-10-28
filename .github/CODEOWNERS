@@ -1,0 +1,15 @@
+/.github/ @PRIMOmics/score-owners
+/pyproject.toml @PRIMOmics/score-owners
+/uv.lock @PRIMOmics/score-owners
+/src/primomics/ @PRIMOmics/score-owners
+/scripts/baselines.py @PRIMOmics/score-owners
+/space/requirements.txt @PRIMOmics/score-owners
+/space/app.py @PRIMOmics/score-owners
+/space/evaluator.py @PRIMOmics/score-owners
+/space/scoring.py @PRIMOmics/score-owners
+/space/boards.py @PRIMOmics/score-owners
+/space/leaderboard.py @PRIMOmics/score-owners
+/space/results.py @PRIMOmics/score-owners
+/space/rescore.py @PRIMOmics/score-owners
+/space/versions.py @PRIMOmics/score-owners
+/space/versions.yaml @PRIMOmics/score-owners
