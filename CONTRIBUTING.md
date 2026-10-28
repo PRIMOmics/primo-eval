@@ -76,6 +76,10 @@ A score must never change by accident.
 - Say in the PR description whether scores change.
 - Some tests check exact reference scores. Change these values only on purpose, and
   explain why in the PR.
+- The scorer has two copies: one in `src/primomics/` for `primo evaluate`, and one
+  in `space/evaluator.py` and `space/scoring.py` for the leaderboard. A change to
+  the scoring goes into both, in the same PR. `tests/` and `space_tests/` check the
+  same reference scores.
 
 ## Code
 
