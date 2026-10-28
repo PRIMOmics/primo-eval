@@ -36,6 +36,9 @@ exactly one embedding per unique `sample_id`; the submission schema is unchanged
 
 ### Good to know
 
+**Limits.** An account can publish 4 submissions in 24 hours. A submission file
+can weigh 500 MB at most.
+
 Files containing dataset IDs from another modality are rejected. **Partial
 submissions are welcome, and they add up.** Cover fewer datasets and you are still
 scored: you get ranked on every **board** whose scored tasks you covered in

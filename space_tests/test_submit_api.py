@@ -296,6 +296,13 @@ def test_primo_submit_knows_the_file_limit_of_the_space():
     assert _client_constant("MAX_FILE_BYTES") == MAX_FILE_SIZE
 
 
+def test_the_submit_page_gives_the_limits():
+    page = app._page_text("submit")
+
+    assert f"{SUBMISSIONS_PER_DAY} submissions in 24 hours" in page
+    assert f"{MAX_FILE_SIZE // 1_000_000} MB" in page
+
+
 def test_the_space_launches_with_the_file_limit():
     launch = next(
         node
