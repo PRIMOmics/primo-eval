@@ -398,16 +398,18 @@ NAV_TABS = (
 )
 LEDE = (
     "PRIMO ranks omics foundation models on real "
-    '<a target="_self" href="{tasks}">clinical tasks</a>. Your model turns each '
-    "patient's omics profile into an embedding. One fixed probe, the same for every "
-    "model, then predicts hidden outcomes such as treatment response or prognosis, "
-    "so the score measures the embedding."
+    '<a target="_self" href="{tasks}">drug development tasks</a>. Your model turns '
+    "each patient's omics profile into an embedding. One fixed probe, the same for "
+    "every model, then predicts hidden outcomes such as treatment response or "
+    "prognosis, so the score measures the embedding."
 )
 RANKED_NOTE = (
-    '<p class="pm-note">We score zero-shot representations, so a score is not the '
-    "best a model can reach. Only models that covered every task scored by the "
-    f"<code>{ELO_ANCHOR_MODEL}</code> baseline are ranked. <code>+ HVG</code> rows "
-    "concatenate a model with the baseline's features.</p>"
+    '<p class="pm-note">Models are ranked by Elo over the tasks of the view, '
+    f"anchored on the <code>{ELO_ANCHOR_MODEL}</code> baseline at 1000. Only models "
+    "that covered every task scored by this baseline are ranked. Task columns show "
+    "the mean score, each in its own metric. <code>+ HVG</code> rows concatenate a "
+    "model with the baseline's features. We score zero-shot representations, so a "
+    "score is not the best a model can reach.</p>"
 )
 N_TOP = 3
 ORDINAL_SUFFIXES = {1: "st", 2: "nd", 3: "rd"}
@@ -427,11 +429,6 @@ SHORT_METRICS = {
 }
 CATEGORY_HEADER = re.compile(r"^(?P<name>.+) \((?P<metric>[^()]+)\)$")
 STRABLE_URL = "https://gblayer.github.io/strable-leaderboard/"
-BOARD_SUB = (
-    '<p class="pm-board-sub">Models are ranked by Elo over the tasks of the view, '
-    f"anchored on the {ELO_ANCHOR_MODEL} baseline at 1000. Task columns show the "
-    "mean score, each in its own metric.</p>"
-)
 ART_GENES = (0.55, 0.9, 0.4, 0.75, 0.35, 0.95, 0.5, 0.8, 0.45, 0.7, 0.3, 0.85, 0.6, 0.4)
 ART_EMBEDDING = (0.7, 1.0, 0.6, 0.9, 0.75, 0.95)
 ART_LAYERS = ((4, 132), (5, 150), (3, 168))
@@ -461,7 +458,7 @@ def _hero_art() -> str:
         _art_text(58, 22, "Patient omics", "pm-art-h"),
         _art_text(162, 22, "Your model", "pm-art-h"),
         _art_text(254, 22, "Embedding", "pm-art-h"),
-        _art_text(351, 22, "Clinical tasks", "pm-art-h"),
+        _art_text(380, 22, "Drug development tasks", "pm-art-h"),
         '<circle class="pm-art-patient" cx="58" cy="44" r="8"></circle>',
         '<path class="pm-art-patient" d="M45 66 Q58 50 71 66 Z"></path>',
     ]
@@ -506,16 +503,17 @@ def _hero_art() -> str:
     for index, task in enumerate(ART_TASKS):
         y = 74 + index * 44
         parts += [
-            f'<path class="pm-art-line" d="M268 150 C 278 150, 278 {y}, 288 {y}"></path>',
-            f'<rect class="pm-art-pill" x="290" y="{y - 14}" width="122" height="28" '
+            f'<path class="pm-art-line" d="M268 150 C 292 150, 292 {y}, 317 {y}"></path>',
+            f'<rect class="pm-art-pill" x="319" y="{y - 14}" width="122" height="28" '
             'rx="14"></rect>',
-            _art_text(302, y + 4, task, "pm-art-t", anchor="start"),
+            _art_text(331, y + 4, task, "pm-art-t", anchor="start"),
         ]
     return (
-        '<div class="pm-art"><svg class="pm-hero-art" viewBox="0 0 420 268" '
+        '<div class="pm-art"><svg class="pm-hero-art" viewBox="0 0 452 268" '
         'role="img" aria-labelledby="pm-art-title"><title id="pm-art-title">A patient\'s '
         "omics profile goes through your model, which returns one embedding per "
-        "sample. The same fixed probe then scores that embedding on clinical tasks."
+        "sample. The same fixed probe then scores that embedding on drug development "
+        "tasks."
         f"</title>{''.join(parts)}</svg></div>"
     )
 

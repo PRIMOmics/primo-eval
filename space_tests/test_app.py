@@ -1,5 +1,6 @@
 """Unit tests for submission feedback in the PRIMO app."""
 
+import ast
 import importlib
 import os
 import subprocess
@@ -15,7 +16,9 @@ from .conftest import CLOSED, REGISTRY
 
 previous_gradio = sys.modules.get("gradio")
 gradio_stub = ModuleType("gradio")
-gradio_stub.themes = SimpleNamespace(Base=lambda **kwargs: object())
+gradio_stub.themes = SimpleNamespace(
+    Base=lambda **kwargs: kwargs, LocalFont=lambda name, weights: (name, weights)
+)
 gradio_stub.OAuthProfile = object
 gradio_stub.Request = object
 gradio_stub.Blocks = object
@@ -372,3 +375,21 @@ def test_a_closed_version_reads_its_commits_and_its_rows(monkeypatch):
     assert list(by_id) == ["t901"]
     assert list(rows["model_name"]) == ["old"]
     assert version == CLOSED
+
+
+def test_the_theme_loads_the_regular_and_bold_fonts_of_the_design():
+    assert app.THEME["font"][0] == ("IBM Plex Sans", (400, 700))
+    assert app.THEME["font_mono"][0] == ("IBM Plex Mono", (400, 700))
+
+
+def test_the_page_style_goes_to_launch_as_gradio_6_asks():
+    keywords = {
+        node.func.attr: {keyword.arg for keyword in node.keywords}
+        for node in ast.walk(ast.parse(Path(app.__file__).read_text()))
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") in ("Blocks", "launch")
+    }
+    style = {"theme", "head", "css_paths", "js"}
+
+    assert style <= keywords["launch"]
+    assert not style & keywords["Blocks"]

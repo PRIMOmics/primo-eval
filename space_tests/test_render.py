@@ -156,6 +156,15 @@ def test_the_ranking_has_no_mean_score_and_one_line_per_model(registry, results)
     assert "#pm-site .pm-ranked td { white-space: nowrap; }" in css
 
 
+def test_one_note_under_the_ranking_explains_how_to_read_it(registry, results):
+    df = results(*[("eva", tid, 0.8, "2026-01-01") for tid in registry])
+    note = _ranked(_view(registry, df)).split("</table>")[1]
+
+    assert "ranked by Elo" in note
+    assert note.index("ranked by Elo") < note.index("Task columns")
+    assert note.index("Task columns") < note.index("zero-shot")
+
+
 def test_the_top_three_are_framed_until_the_table_is_sorted(registry, results):
     scores = (("a", 0.9), ("b", 0.8), ("c", 0.7), ("d", 0.6))
     df = results(
@@ -520,9 +529,10 @@ def test_the_hero_shows_how_a_model_is_scored(boards, results):
     html = hero_html(boards, results())
 
     assert 'class="pm-hero-art"' in html
-    for step in ("Patient omics", "Your model", "Embedding", "Clinical tasks"):
+    for step in ("Patient omics", "Your model", "Embedding", "Drug development tasks"):
         assert step in html
     assert "placeholder" not in html.lower()
+    assert ">drug development tasks</a>" in html
 
 
 def test_the_release_notes_are_on_the_board_not_on_github(results, monkeypatch):
@@ -604,6 +614,28 @@ def test_both_windows_open_in_the_middle_of_the_screen():
     css = Path(render.__file__).with_name("primo.css").read_text()
 
     assert "#pm-site .pm-dialog { margin: auto !important; }" in css
+
+
+def test_links_keep_no_padding_from_the_gradio_html_style():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site :where(.gradio-style) a { padding: 0; }" in css
+
+
+def test_links_written_as_code_keep_their_underline():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site .prose a > code { display: inline; }" in css
+
+
+def test_the_modality_pills_have_the_size_of_the_others_in_coral():
+    css = Path(render.__file__).with_name("primo.css").read_text()
+
+    assert "#pm-site .pm-seg--main label {" not in css
+    assert (
+        "#pm-site .pm-seg--main label.selected, #pm-site .pm-seg--main "
+        "label:has(input:checked) { background: var(--pm-mark) !important;"
+    ) in css
 
 
 def test_evaluation_status_announces_that_scoring_is_in_progress():
