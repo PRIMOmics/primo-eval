@@ -283,17 +283,43 @@ def test_evaluate_of_a_missing_file_is_the_users_error(
     assert "cannot read" in caplog.text
 
 
-def test_evaluate_checks_the_output_folder_before_scoring(
+@pytest.mark.parametrize(
+    ("output", "reason"),
+    [
+        ("missing/results.json", "its folder does not exist"),
+        ("results", "it is a folder"),
+        ("read-only/results.json", "its folder is read-only"),
+    ],
+)
+def test_evaluate_checks_the_output_path_before_scoring(
+    public_tasks, local_data, tmp_path, caplog, output, reason
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    (tmp_path / "results").mkdir()
+    (tmp_path / "read-only").mkdir()
+    (tmp_path / "read-only").chmod(0o500)
+
+    code = _evaluate(submission, local_data, "-o", str(tmp_path / output))
+
+    (tmp_path / "read-only").chmod(0o700)
+    assert code == 1
+    assert reason in caplog.text
+    assert "Scored" not in caplog.text
+
+
+def test_evaluate_reports_an_output_it_cannot_write(
     public_tasks, local_data, tmp_path, caplog
 ):
     submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
-    output = tmp_path / "missing" / "results.json"
+    output = tmp_path / "results.json"
+    output.touch()
+    output.chmod(0o400)
 
     code = _evaluate(submission, local_data, "-o", str(output))
 
     assert code == 1
-    assert "its folder does not exist" in caplog.text
-    assert "Scored" not in caplog.text
+    assert "cannot write" in caplog.text
+    assert "Permission denied" in caplog.text
 
 
 def test_evaluate_lists_the_datasets_missing_from_the_file(
