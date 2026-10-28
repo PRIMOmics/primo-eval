@@ -174,6 +174,38 @@ def test_evaluate_scores_public_tasks_and_validates_the_rest(
     assert "Validated, scored on submit: d902" in caplog.text
 
 
+@pytest.mark.parametrize("cpus", ["2", "1"], ids=["workers", "one process"])
+def test_evaluate_hides_the_scikit_learn_notices(
+    public_tasks, local_data, tmp_path, monkeypatch, cpus
+):
+    monkeypatch.delenv("PYTHONWARNINGS", raising=False)
+    monkeypatch.setenv("LOKY_MAX_CPU_COUNT", cpus)
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+    script = (
+        "import sys; from primomics import cli; cli.PUBLIC_TASKS = sys.argv[1]; "
+        "sys.exit(cli.main(sys.argv[2:]))"
+    )
+    args = [
+        "evaluate",
+        str(submission),
+        "--modality",
+        "bulk-rna",
+        "--data-dir",
+        str(local_data),
+    ]
+
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "public_tasks.yaml"), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Scored 1 of 1 labelled public task(s)." in result.stderr
+    assert "FutureWarning" not in result.stderr
+
+
 def test_evaluate_matches_score_all_on_the_same_files(
     public_tasks, local_data, tmp_path
 ):

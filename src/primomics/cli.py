@@ -14,7 +14,9 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
+import warnings
 from dataclasses import asdict
 from pathlib import Path
 from typing import NoReturn
@@ -49,6 +51,8 @@ from primomics.evaluate import (
 from primomics.submission import DATASET_ID, norm_id
 from primomics.submit import MAX_FILE_BYTES, PUBLISHED, REFUSED, SPACE, submit
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
+
+LOGISTIC_MODULE = "sklearn.linear_model._logistic"
 
 logger = logging.getLogger(__name__)
 
@@ -415,11 +419,22 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _hide_probe_warnings() -> None:
+    """Hide the FutureWarnings of the probe's logistic regression, in the workers too.
+
+    scikit-learn stays below 1.10, so its notices about 1.10 do not concern a
+    participant. Each scoring worker is a new Python process that reads PYTHONWARNINGS.
+    """
+    warnings.filterwarnings("ignore", category=FutureWarning, module=LOGISTIC_MODULE)
+    os.environ["PYTHONWARNINGS"] = f"ignore::FutureWarning:{LOGISTIC_MODULE}"
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one ``primo`` command and return its exit code."""
     args = _parser().parse_args(argv)
     logging.basicConfig(format="%(message)s")
     logging.getLogger("primomics").setLevel(logging.INFO)
+    _hide_probe_warnings()
     try:
         args.run(args)
     except SubmissionError as error:
