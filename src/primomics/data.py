@@ -12,6 +12,7 @@ before anything is scored or sent.
 import json
 import logging
 import os
+import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -236,7 +237,8 @@ def download(
     """Fetch the datasets of one modality at ``revision``, and their public labels.
 
     ``tasks`` are the public tasks; a public task whose label files are not on the
-    Hub is reported in ``unlabelled`` rather than failing the download.
+    Hub is reported in ``unlabelled`` rather than failing the download. The manifest
+    is read in a scratch folder, so a failed check leaves the data folder as it was.
     """
     data_dir = Path(data_dir)
     try:
@@ -246,18 +248,18 @@ def download(
     if not os.access(data_dir, os.W_OK):
         raise SubmissionError(f"cannot write to {data_dir}: it is read-only")
     api = HfApi()
-    with _hub_errors():
+    with _hub_errors(), tempfile.TemporaryDirectory() as scratch:
         revision = api.dataset_info(DATA_REPO, revision=revision).sha
-        manifest_path = hf_hub_download(
-            DATA_REPO,
-            DATASETS_MANIFEST,
-            repo_type=REPO_TYPE,
-            revision=revision,
-            local_dir=data_dir,
+        manifest = load_manifest(
+            hf_hub_download(
+                DATA_REPO,
+                DATASETS_MANIFEST,
+                repo_type=REPO_TYPE,
+                revision=revision,
+                local_dir=scratch,
+            )
         )
-    datasets = select_datasets(
-        load_manifest(manifest_path), modality, tasks, public_only, dataset_ids
-    )
+    datasets = select_datasets(manifest, modality, tasks, public_only, dataset_ids)
     selected = {norm_id(entry["id"]) for entry in datasets}
     task_ids = [
         norm_id(task[TASK_ID])

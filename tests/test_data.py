@@ -94,6 +94,13 @@ def test_unknown_dataset_ids_raise(fake_hub, tmp_path):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d999"])
 
 
+def test_a_failed_download_leaves_the_data_folder_as_it_was(fake_hub, tmp_path):
+    with pytest.raises(SubmissionError, match="unknown dataset id"):
+        data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d999"])
+
+    assert _downloaded(tmp_path) == []
+
+
 def test_dataset_ids_of_another_modality_raise(fake_hub, tmp_path):
     with pytest.raises(SubmissionError, match="not in the bulk-rna selection"):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d903"])
