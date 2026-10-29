@@ -1673,6 +1673,22 @@ def test_probe_matches_the_package_on_a_fixed_dataset(kind, expected):
     assert score == pytest.approx(expected, abs=1e-9)
 
 
+def test_a_class_missing_from_training_gets_a_zero_column():
+    """Class 1 is missing: classes 0 and 2 keep their own probability columns."""
+    rng = np.random.default_rng(4)
+    groups = np.repeat([f"p{i:02d}" for i in range(20)], 2)
+    y = np.repeat(np.arange(20) % 2 * 2, 2)
+    x = rng.normal(size=(40, 5)) + y[:, None]
+
+    pred = ev.fit_predict(
+        "classification", x, y, rng.normal(size=(6, 5)), np.array([0, 1, 2]), groups
+    )
+
+    assert pred.shape == (6, 3)
+    assert np.all(pred[:, 1] == 0.0)
+    assert np.allclose(pred.sum(axis=1), 1.0)
+
+
 def test_load_labels_requires_subject_ids(tmp_path):
     pd.DataFrame(
         {ev.SAMPLE_ID: ["s1", "s2"], ev.LABEL: [0, 1], ev.FOLD: [0, 1]}
