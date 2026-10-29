@@ -17,6 +17,7 @@ jobs:
         with:
           version: "0.12.9"
           enable-cache: false
+      - run: test "$(uv version --short)" = "${GITHUB_REF_NAME#v}"
       - run: uv build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
