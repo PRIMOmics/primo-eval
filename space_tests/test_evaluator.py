@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from huggingface_hub.utils import EntryNotFoundError
+from scoring import compute_auroc, compute_pearson
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import roc_auc_score
 from versions import CURRENT
@@ -194,6 +195,53 @@ def test_id_normalisation_int_vs_str():
     assert ev._align(labels, emb).shape == (4, 4)
 
 
+def _fixed_task(kind):
+    """30 patients with 2 samples each, built from formulas: the same everywhere."""
+    rows = np.arange(60)
+    subject = rows // 2
+    latent = np.sin(0.9 * subject)
+    x = np.outer(latent, np.linspace(1.0, 0.2, 8)) + 0.8 * np.sin(
+        np.outer(rows + 1, np.arange(1, 9))
+    )
+    ids = [f"s{i:02d}" for i in rows]
+    labels = pd.DataFrame(
+        {ev.SAMPLE_ID: ids, ev.SUBJECT_ID: [f"p{s:02d}" for s in subject]}
+    )
+    if kind == "regression":
+        labels[ev.LABEL] = latent + 0.3 * np.cos(2.0 * rows)
+        task = _task("t902", "d902", "regression", "pearson", "Derm")
+    else:
+        labels[ev.LABEL] = (latent > 0).astype(int)
+        task = _task("t901", "d901", "classification", "auroc", "Gastro")
+    if kind == "transfer":
+        labels[ev.SPLIT] = np.where(subject < 20, ev.SPLIT_TRAIN, ev.SPLIT_TEST)
+    else:
+        for repeat in range(10):
+            rank = np.argsort(np.argsort(np.sin((repeat + 1.3) * np.arange(30))))
+            column = ev.FOLD if repeat == 0 else f"{ev.FOLD}_{repeat}"
+            labels[column] = (rank % 3)[subject]
+    return task, labels, _emb_frame(x, ids)
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected", "n_repeats", "n_samples"),
+    [
+        ("classification", 0.9453670634920636, 10, 60),
+        ("regression", 0.9407686709886036, 10, 60),
+        ("transfer", 0.9791666666666666, 1, 20),
+    ],
+)
+def test_fixed_tasks_match_the_package(kind, expected, n_repeats, n_samples):
+    """Scores that tests/test_evaluate.py also pins."""
+    task, labels, emb = _fixed_task(kind)
+
+    result = ev.score_task(task, labels, emb)
+
+    assert result.score == pytest.approx(expected, abs=1e-9)
+    assert len(result.repeat_scores) == n_repeats
+    assert result.n_samples == n_samples
+
+
 # --- probe: leave-pair-out on small binary tasks ---
 
 
@@ -203,7 +251,7 @@ def _fixed_probe(scores, seen):
     def fit_predict(
         task_type, x_train, y_train, x_test, classes, groups_train, inner_cv_jobs
     ):
-        seen.append((x_train[:, 0].astype(int), x_test[:, 0].astype(int)))
+        seen.append((x_train[:, 0].astype(int), x_test[:, 0].astype(int), groups_train))
         positive = scores[x_test[:, 0].astype(int)]
         return np.column_stack([1 - positive, positive])
 
@@ -246,16 +294,17 @@ def test_leave_pair_out_with_a_fixed_probe_equals_the_auroc(
     assert score == pytest.approx(roc_auc_score(labels[ev.LABEL], scores))
 
 
-def test_leave_pair_out_never_trains_on_a_held_out_subject(monkeypatch):
+def test_leave_pair_out_holds_out_whole_subjects_and_groups_the_probe(monkeypatch):
     labels, matrix, scores = _small_cohort(8, 2)
     seen = []
     _use_fixed_probe(monkeypatch, scores, seen)
     _lpo(labels, matrix)
     subjects = labels[ev.SUBJECT_ID].to_numpy()
     assert len(seen) == 4 * 4
-    for train, test in seen:
+    for train, test, groups_train in seen:
         assert len(np.unique(subjects[test])) == 2
         assert set(subjects[train]).isdisjoint(subjects[test])
+        assert groups_train.tolist() == subjects[train].tolist()
 
 
 def test_parallel_and_sequential_leave_pair_out_agree(monkeypatch):
@@ -332,6 +381,24 @@ def test_leave_pair_out_needs_one_label_per_subject():
     )
     with pytest.raises(ev.EvaluatorError, match="more than one label"):
         _lpo(labels, np.ones((4, 2)))
+
+
+def test_leave_pair_out_counts_ties_as_half(monkeypatch):
+    labels, matrix, _ = _small_cohort(6, 1)
+    _use_fixed_probe(monkeypatch, np.full(6, 0.5), [])
+    assert _lpo(labels, matrix) == 0.5
+
+
+def test_leave_pair_out_weights_each_subject_pair_by_its_sample_pairs(monkeypatch):
+    """Uneven samples per subject: the score is still the sample-level AUROC."""
+    sizes = np.array([1, 3, 2, 1, 3, 2, 2, 1])
+    subjects = np.repeat([f"p{i}" for i in range(8)], sizes)
+    y = np.repeat(np.arange(8) % 2, sizes)
+    labels = _labels(y, _folds(len(y), 3), subjects=subjects)
+    scores = np.random.default_rng(1).random(len(y))
+    _use_fixed_probe(monkeypatch, scores, [])
+    matrix = np.arange(len(y))[:, None].astype(float)
+    assert _lpo(labels, matrix) == pytest.approx(roc_auc_score(y, scores))
 
 
 def test_a_small_binary_task_without_subjects_is_our_error():
@@ -508,6 +575,43 @@ def test_score_all_full_coverage_signal(tmp_path):
     assert res["missing"] == [] and res["invalid"] == []
     assert res["incomplete"] == []
     assert res["n_datasets_scored"] == 2 and res["n_datasets_total"] == 2
+
+
+def test_score_all_matches_the_package(tmp_path):
+    """The summary that tests/test_evaluate.py also pins, read on the unit sphere."""
+    cls_task, cls_labels, emb = _fixed_task("classification")
+    reg_task, reg_labels, _ = _fixed_task("regression")
+    _write_csv(tmp_path / "sub.csv", {"d901": (list(emb.index), emb.to_numpy())})
+    tasks = [
+        cls_task,
+        {**reg_task, "dataset_id": "d901"},
+        _task("t903", "d903", "regression", "pearson", "Derm"),
+    ]
+    datasets = [
+        {"id": "d901", "modality": "bulk RNA"},
+        {"id": "d903", "modality": "bulk RNA"},
+    ]
+    labels_by = {"t901": cls_labels, "t902": reg_labels}
+
+    res = ev.score_all(
+        tmp_path / "sub.csv",
+        modality="bulk-rna",
+        datasets=datasets,
+        tasks=tasks,
+        fetch_labels=lambda task_id, token=None: labels_by[task_id],
+    )
+
+    assert res["categories"]["treatment_outcome"]["mean"] == pytest.approx(
+        0.9301706349206349, abs=1e-9
+    )
+    assert res["categories"]["clinical_scores"]["mean"] == pytest.approx(
+        0.9118100571001598, abs=1e-9
+    )
+    assert res["missing"] == ["d903"]
+    assert res["coverage"] == pytest.approx(2 / 3)
+    assert (res["n_scored"], res["n_total"], res["full_coverage"]) == (2, 3, False)
+    assert (res["n_datasets_scored"], res["n_datasets_total"]) == (1, 2)
+    assert res["invalid"] == [] and res["incomplete"] == []
 
 
 def test_score_all_scopes_submission_to_selected_modality(tmp_path):
@@ -877,6 +981,48 @@ def test_score_all_transfer_two_tasks(tmp_path):
     assert set(res["categories"]) == {"treatment_outcome"}
 
 
+def test_compatible_transfer_regression_tasks_score_as_if_alone(tmp_path, monkeypatch):
+    """The grouped transfer fit gives each task the score it gets on its own."""
+    rng = np.random.default_rng(82)
+    n = 60
+    ids = [f"s{i}" for i in range(n)]
+    matrix = rng.normal(size=(n, 8))
+    split = np.where(np.arange(n) < 40, ev.SPLIT_TRAIN, ev.SPLIT_TEST)
+    labels = [
+        _transfer_labels(matrix[:, 0] + rng.normal(scale=0.1, size=n), split, ids),
+        _transfer_labels(matrix[:, 1] + rng.normal(scale=0.1, size=n), split, ids),
+    ]
+    tasks = [
+        _task("t1", "d901", "regression", "pearson", "Gastro"),
+        _task("t2", "d901", "regression", "pearson", "Gastro"),
+    ]
+    frame = ev._l2_normalize_rows(_emb_frame(matrix, ids))
+    expected = [
+        ev.score_task(task, target, frame) for task, target in zip(tasks, labels)
+    ]
+    _write_csv(tmp_path / "s.csv", {"d901": (ids, matrix)})
+    calls = 0
+    original = ev._ridge_predict_by_target
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ev, "_ridge_predict_by_target", counted)
+    result = ev.score_all(
+        tmp_path / "s.csv",
+        datasets=[{"id": "d901"}],
+        tasks=tasks,
+        fetch_labels=lambda task_id, token=None: labels[int(task_id[-1]) - 1],
+    )
+
+    assert [score.score for score in result["per_task"]] == pytest.approx(
+        [score.score for score in expected]
+    )
+    assert calls == 1
+
+
 # --- perturbation response decoding ---
 
 
@@ -940,6 +1086,54 @@ def test_perturbation_signal_decodes_hidden_response():
     assert result.diagnostics == {}
 
 
+def _fixed_perturbation(kind):
+    """36 patients, a 5-dim embedding and 40 genes, all built from formulas."""
+    rows = np.arange(36)
+    emb = np.sin(np.outer(rows + 1, np.arange(1, 6)) * 0.7)
+    weights = np.cos(np.outer(np.arange(1, 6), np.arange(1, 41)) * 0.3)
+    delta = emb @ weights + 0.5 * np.sin(np.outer(rows + 2, np.arange(1, 41)) * 1.7)
+    ids = [f"s{i:02d}" for i in rows]
+    labels = pd.DataFrame(
+        {
+            ev.SAMPLE_ID: ids,
+            ev.SUBJECT_ID: [f"p{i:02d}" for i in rows],
+            ev.PAIR_ID: [f"pair{i:02d}" for i in rows],
+            ev.PAIRING: ev.PAIRED,
+        }
+    )
+    if kind == "cv":
+        for repeat in range(10):
+            rank = np.argsort(np.argsort(np.sin((repeat + 1.3) * rows)))
+            labels[ev.FOLD if repeat == 0 else f"{ev.FOLD}_{repeat}"] = rank % 3
+    else:
+        labels[ev.SPLIT] = np.where(rows < 24, ev.SPLIT_TRAIN, ev.SPLIT_TEST)
+    task = {
+        **_perturbation_task(target_centered=kind == "transfer-centered"),
+        "n_top_de_genes": 10,
+    }
+    targets = ev.PerturbationTargets(delta, np.array([f"g{i}" for i in range(40)]))
+    return task, labels, _emb_frame(emb, ids), targets
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected", "n_repeats", "n_samples"),
+    [
+        ("cv", 0.7657239057239057, 10, 36),
+        ("transfer", 0.7747474747474747, 1, 12),
+        ("transfer-centered", 0.8262626262626261, 1, 12),
+    ],
+)
+def test_perturbation_matches_the_package(kind, expected, n_repeats, n_samples):
+    """Perturbation scores that tests/test_evaluate.py also pins."""
+    task, labels, emb, targets = _fixed_perturbation(kind)
+
+    result = ev.score_task(task, labels, emb, targets)
+
+    assert result.score == pytest.approx(expected, abs=1e-9)
+    assert len(result.repeat_scores) == n_repeats
+    assert result.n_samples == n_samples
+
+
 def test_perturbation_decoder_clips_test_coordinates(monkeypatch):
     seen = {}
 
@@ -960,7 +1154,7 @@ def test_perturbation_decoder_clips_test_coordinates(monkeypatch):
         False,
     )
 
-    assert seen["maximum"] == ev.PERTURBATION_TEST_Z_CLIP
+    assert seen["maximum"] == 20.0
     assert score == pytest.approx(0.0)
 
 
@@ -1207,6 +1401,36 @@ def test_reference_scoring_normalizes_the_embedding_block_first(tmp_path):
     assert [t.score for t in plain["per_task"]] != [t.score for t in alone["per_task"]]
 
 
+def test_reference_scores_match_the_package(tmp_path):
+    """The '+ HVG' scores that tests/test_evaluate.py also pins."""
+    cls_task, cls_labels, emb = _fixed_task("classification")
+    reg_task, reg_labels, _ = _fixed_task("regression")
+    ids = list(emb.index)
+    _write_csv(tmp_path / "sub.csv", {"d901": (ids, emb.to_numpy())})
+    rows = np.arange(60)
+    latent = np.sin(0.9 * (rows // 2))
+    genes = np.exp(
+        np.sin(np.outer(rows + 3, np.arange(1, 6)) * 0.45) + 0.5 * latent[:, None]
+    )
+    reference = pd.DataFrame(genes, columns=[f"g{j}" for j in range(5)])
+    reference.insert(0, ev.SAMPLE_ID, ids)
+    reference.insert(0, ev.DATASET_ID, "d901")
+    reference.iloc[::-1].to_csv(tmp_path / "reference.csv", index=False)
+    labels_by = {"t901": cls_labels, "t902": reg_labels}
+
+    res = ev.score_all(
+        tmp_path / "sub.csv",
+        datasets=[{"id": "d901"}],
+        tasks=[cls_task, {**reg_task, "dataset_id": "d901"}],
+        fetch_labels=lambda task_id, token=None: labels_by[task_id],
+        reference=tmp_path / "reference.csv",
+    )
+
+    scores = {score.task_id: score.score for score in res["per_task"]}
+    assert scores["t901"] == pytest.approx(0.8951974206349208, abs=1e-9)
+    assert scores["t902"] == pytest.approx(0.7955713580462145, abs=1e-9)
+
+
 def test_reference_missing_a_dataset_is_our_error(tmp_path):
     path, datasets, tasks, fetch = _two_task_submission(tmp_path)
     reference = _reference_for(path, tmp_path / "reference.csv")
@@ -1350,6 +1574,119 @@ def test_classification_inner_selection_stratifies_real_labels():
     for _, test in ev._inner_cv(y, groups):
         assert abs(y[test].sum() - ideal_positives) <= 2
         assert abs(len(test) - ideal_size) <= 3
+
+
+def test_inner_folds_match_the_package():
+    """The inner splits for 12 patients that tests/test_probe.py also pins."""
+    subjects = np.arange(12)
+    sizes = 1 + subjects % 3
+    groups = np.repeat([f"p{s:02d}" for s in subjects], sizes)
+    y = np.repeat(subjects % 2, sizes)
+
+    logistic = [sorted(test.tolist()) for _, test in ev._inner_cv(y, groups)]
+    ridge = [sorted(test.tolist()) for _, test in ev._group_inner_cv(groups)]
+
+    assert logistic == [
+        [13, 14, 15, 16, 17],
+        [3, 4, 5, 6, 18],
+        [9, 10, 11, 19, 20],
+        [0, 12, 21, 22, 23],
+        [1, 2, 7, 8],
+    ]
+    assert ridge == [
+        [7, 8, 21, 22, 23],
+        [1, 2, 15, 16, 17],
+        [6, 9, 10, 11, 18],
+        [0, 3, 4, 5, 12],
+        [13, 14, 19, 20],
+    ]
+
+
+def test_probe_settings_match_the_package(monkeypatch):
+    """The protocol numbers that tests/test_probe.py also pins."""
+    seen = {}
+    real = ev.LogisticRegressionCV
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(ev, "LogisticRegressionCV", spy)
+    x, y, groups, train = _fixed_dataset("binary")
+    ev.fit_predict(
+        "classification", x[train], y[train], x[~train], np.unique(y), groups[train]
+    )
+
+    assert np.array_equal(seen["Cs"], np.logspace(-6.0, 6.0, 13))
+    assert np.array_equal(ev.RIDGE_ALPHAS, np.logspace(-6.0, 6.0, 25))
+    assert ev.INNER_CV == 5
+    assert (
+        seen["scoring"],
+        seen["solver"],
+        seen["tol"],
+        seen["max_iter"],
+        seen["random_state"],
+    ) == ("roc_auc", "lbfgs", 1e-3, 5000, 0)
+
+
+def _fixed_dataset(kind):
+    """A small dataset built from formulas, so it is the same on every machine."""
+    rows = np.arange(60)
+    subject = rows // 2
+    groups = np.array([f"p{s:02d}" for s in subject])
+    latent = np.sin(0.9 * subject)
+    x = np.outer(latent, np.linspace(1.0, 0.2, 8)) + 0.8 * np.sin(
+        np.outer(rows + 1, np.arange(1, 9))
+    )
+    if kind == "binary":
+        y = (latent > 0).astype(int)
+    elif kind == "multiclass":
+        y = np.digitize(latent, [-0.5, 0.5])
+    else:
+        y = latent + 0.3 * np.cos(2.0 * rows)
+    return x, y, groups, subject < 20
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("binary", 0.9791666666666666),
+        ("multiclass", 0.8922619047619047),
+        ("regression", 0.9613594026339882),
+    ],
+)
+def test_probe_matches_the_package_on_a_fixed_dataset(kind, expected):
+    """Probe scores that tests/test_probe.py also pins."""
+    x, y, groups, train = _fixed_dataset(kind)
+    if kind == "regression":
+        pred = ev.fit_predict(
+            kind, x[train], y[train], x[~train], np.array([]), groups[train]
+        )
+        score = compute_pearson(y[~train], pred)
+    else:
+        classes = np.unique(y)
+        pred = ev.fit_predict(
+            "classification", x[train], y[train], x[~train], classes, groups[train]
+        )
+        score = compute_auroc(y[~train], pred, classes)
+
+    assert score == pytest.approx(expected, abs=1e-9)
+
+
+def test_a_class_missing_from_training_gets_a_zero_column():
+    """Class 1 is missing: classes 0 and 2 keep their own probability columns."""
+    rng = np.random.default_rng(4)
+    groups = np.repeat([f"p{i:02d}" for i in range(20)], 2)
+    y = np.repeat(np.arange(20) % 2 * 2, 2)
+    x = rng.normal(size=(40, 5)) + y[:, None]
+
+    pred = ev.fit_predict(
+        "classification", x, y, rng.normal(size=(6, 5)), np.array([0, 1, 2]), groups
+    )
+
+    assert pred.shape == (6, 3)
+    assert np.all(pred[:, 1] == 0.0)
+    assert np.allclose(pred.sum(axis=1), 1.0)
 
 
 def test_load_labels_requires_subject_ids(tmp_path):

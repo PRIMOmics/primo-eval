@@ -916,7 +916,7 @@ def test_perturbation_decoder_clips_test_coordinates(monkeypatch):
         False,
     )
 
-    assert seen["maximum"] == ev.PERTURBATION_TEST_Z_CLIP
+    assert seen["maximum"] == 20.0
     assert score == pytest.approx(0.0)
 
 
