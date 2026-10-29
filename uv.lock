@@ -610,7 +610,7 @@ wheels = [
 
 [[package]]
 name = "primomics"
-version = "0.1.6.dev0"
+version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "anndata" },
