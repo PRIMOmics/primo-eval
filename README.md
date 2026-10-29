@@ -76,6 +76,18 @@ command from this folder.
 > [release](https://github.com/PRIMOmics/primo-eval/releases): run
 > `git checkout <tag>` before `uv sync`.
 
+Instead of the clone, you can install the latest release from
+[PyPI](https://pypi.org/project/primomics/), in an environment with Python 3.12 or
+later:
+
+```bash
+pip install primomics
+primo --help
+```
+
+Then drop `uv run` from the commands below, and run every `primo` command from the
+same folder: the data goes to `primo-data/` there.
+
 ### 📥 3. Download the data
 
 Download the datasets of one modality, `bulk-rna` or `single-cell-rna`:
