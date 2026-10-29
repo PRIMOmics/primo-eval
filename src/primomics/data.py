@@ -11,6 +11,8 @@ before anything is scored or sent.
 
 import json
 import logging
+import os
+import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -157,7 +159,12 @@ def read_lock(data_dir: str | Path) -> dict:
     path = Path(data_dir) / LOCK_FILE
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except ValueError as error:
+        raise SubmissionError(
+            f"{path} is damaged: delete it, then run primo download again"
+        ) from error
 
 
 def _update_lock(data_dir: Path, revision: str, files: Iterable[RepoFile]) -> None:
@@ -230,23 +237,29 @@ def download(
     """Fetch the datasets of one modality at ``revision``, and their public labels.
 
     ``tasks`` are the public tasks; a public task whose label files are not on the
-    Hub is reported in ``unlabelled`` rather than failing the download.
+    Hub is reported in ``unlabelled`` rather than failing the download. The manifest
+    is read in a scratch folder, so a failed check leaves the data folder as it was.
     """
     data_dir = Path(data_dir)
-    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise SubmissionError(f"cannot write to {data_dir}: {error}") from error
+    if not os.access(data_dir, os.W_OK):
+        raise SubmissionError(f"cannot write to {data_dir}: it is read-only")
     api = HfApi()
-    with _hub_errors():
+    with _hub_errors(), tempfile.TemporaryDirectory() as scratch:
         revision = api.dataset_info(DATA_REPO, revision=revision).sha
-        manifest_path = hf_hub_download(
-            DATA_REPO,
-            DATASETS_MANIFEST,
-            repo_type=REPO_TYPE,
-            revision=revision,
-            local_dir=data_dir,
+        manifest = load_manifest(
+            hf_hub_download(
+                DATA_REPO,
+                DATASETS_MANIFEST,
+                repo_type=REPO_TYPE,
+                revision=revision,
+                local_dir=scratch,
+            )
         )
-    datasets = select_datasets(
-        load_manifest(manifest_path), modality, tasks, public_only, dataset_ids
-    )
+    datasets = select_datasets(manifest, modality, tasks, public_only, dataset_ids)
     selected = {norm_id(entry["id"]) for entry in datasets}
     task_ids = [
         norm_id(task[TASK_ID])
@@ -315,13 +328,13 @@ def _check_block(
         frame = to_embedding_frame(block)
     except SubmissionError as error:
         return str(error)
-    if not np.isfinite(frame.to_numpy()).all():
-        return "contains NaN or inf values"
     expected = sample_ids(data_dir, entry)
     present = set(frame.index)
     missing = [sample for sample in expected if sample not in present]
     if missing:
         return f"{len(missing)}/{len(expected)} samples missing, e.g. {missing[:5]}"
+    if not np.isfinite(frame.loc[expected].to_numpy()).all():
+        return "contains NaN or inf values"
     extra = len(present - set(expected))
     if extra:
         logger.warning(

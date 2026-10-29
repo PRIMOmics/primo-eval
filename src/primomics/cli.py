@@ -238,6 +238,10 @@ def _evaluate(args: argparse.Namespace) -> None:
     """Run ``primo evaluate``."""
     if args.output and not Path(args.output).parent.is_dir():
         raise SubmissionError(f"cannot write {args.output}: its folder does not exist")
+    if args.output and Path(args.output).is_dir():
+        raise SubmissionError(f"cannot write {args.output}: it is a folder, not a file")
+    if args.output and not os.access(Path(args.output).parent, os.W_OK):
+        raise SubmissionError(f"cannot write {args.output}: its folder is read-only")
     verdicts, manifest = _checked(args)
     tasks = _public_tasks(manifest, args.modality)
     scored = labelled_tasks(args.data_dir, tasks)
@@ -261,7 +265,10 @@ def _evaluate(args: argparse.Namespace) -> None:
     _log_scores(result, verdicts, scored)
     if args.output:
         report = _report(args, manifest, verdicts, scored, unlabelled, result)
-        Path(args.output).write_text(json.dumps(report, indent=2))
+        try:
+            Path(args.output).write_text(json.dumps(report, indent=2))
+        except OSError as error:
+            raise SubmissionError(f"cannot write {args.output}: {error}") from error
         logger.info("Wrote %s.", args.output)
 
 

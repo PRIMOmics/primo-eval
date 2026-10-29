@@ -94,6 +94,13 @@ def test_unknown_dataset_ids_raise(fake_hub, tmp_path):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d999"])
 
 
+def test_a_failed_download_leaves_the_data_folder_as_it_was(fake_hub, tmp_path):
+    with pytest.raises(SubmissionError, match="unknown dataset id"):
+        data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d999"])
+
+    assert _downloaded(tmp_path) == []
+
+
 def test_dataset_ids_of_another_modality_raise(fake_hub, tmp_path):
     with pytest.raises(SubmissionError, match="not in the bulk-rna selection"):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS, dataset_ids=["d903"])
@@ -150,6 +157,13 @@ def test_read_lock_before_any_download_is_empty(tmp_path):
     assert data.read_lock(tmp_path) == {}
 
 
+def test_a_damaged_lock_says_how_to_repair_it(fake_hub, tmp_path):
+    (tmp_path / data.LOCK_FILE).write_text('{"files": ')
+
+    with pytest.raises(SubmissionError, match="delete it, then run primo download"):
+        data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
+
+
 def test_public_tasks_without_labels_are_logged(fake_hub, tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
@@ -179,6 +193,18 @@ def test_a_failed_hub_call_is_an_evaluator_error(fake_hub, tmp_path, monkeypatch
 
     with pytest.raises(EvaluatorError, match="no network"):
         data.download(tmp_path, "bulk-rna", tasks=PUBLIC_TASKS)
+
+
+@pytest.mark.parametrize("folder", ["read-only", "read-only/new"])
+def test_a_data_folder_that_cannot_be_written_raises(fake_hub, tmp_path, folder):
+    (tmp_path / "read-only").mkdir()
+    (tmp_path / "read-only").chmod(0o500)
+
+    with pytest.raises(SubmissionError, match="cannot write to"):
+        data.download(tmp_path / folder, "bulk-rna", tasks=PUBLIC_TASKS)
+
+    (tmp_path / "read-only").chmod(0o700)
+    assert fake_hub.requested == []
 
 
 def test_a_dataset_missing_on_the_hub_raises(fake_hub, tmp_path):
@@ -235,6 +261,17 @@ def test_check_reports_non_finite_values(local_data, tmp_path):
     verdicts = data.check_submission(path, local_data, "bulk-rna")
 
     assert verdicts["d902"] == "contains NaN or inf values"
+
+
+def test_check_ignores_non_finite_values_outside_the_dataset(local_data, tmp_path):
+    blocks = signal_blocks()
+    ids, matrix = blocks["d902"]
+    blocks["d902"] = ([*ids, "extra"], np.vstack([matrix, np.full((1, 4), np.nan)]))
+    path = write_submission(tmp_path / "sub.parquet", blocks)
+
+    verdicts = data.check_submission(path, local_data, "bulk-rna")
+
+    assert verdicts["d902"] == data.OK
 
 
 def test_check_reports_duplicate_samples(local_data, tmp_path):
