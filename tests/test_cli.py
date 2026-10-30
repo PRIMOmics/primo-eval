@@ -349,8 +349,8 @@ def test_the_report_lists_only_the_files_of_the_datasets_in_the_file(
     assert sorted(files) == ["d902/expression.h5ad", "datasets.yaml"]
 
 
-def test_the_spread_over_repeats_is_the_sample_sd():
-    assert cli._sd((0.8, 0.9)) == "0.071"
+def test_the_spread_over_repeats_is_the_one_of_the_leaderboard():
+    assert cli._sd((0.8, 0.9)) == "0.050"
     assert cli._sd((0.8,)) == "-"
 
 
@@ -402,6 +402,20 @@ def test_submit_dry_run_sends_nothing(
     assert code == 0
     assert fake_space.calls == []
     assert "ready to submit" in caplog.text
+
+
+def test_submit_prints_the_reply_of_the_space_without_markdown(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    fake_space.reply = {
+        "status": "published",
+        "message": "**model-901**: covered 2/2 datasets. So is `model-901 + HVG`.",
+        "submission_id": "s-901",
+    }
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    assert _submit(submission, local_data) == 0
+    assert "model-901: covered 2/2 datasets. So is model-901 + HVG." in caplog.text
 
 
 def test_submit_lists_the_datasets_missing_from_the_file(

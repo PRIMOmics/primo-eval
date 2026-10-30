@@ -261,6 +261,18 @@ TABLE_SORT_JS = """
     event.preventDefault();
     sort(header);
   });
+  document.addEventListener("input", (event) => {
+    const box = event.target.closest(".pm-find");
+    const table = box?.closest(".pm-more")?.querySelector("table.pm-table");
+    if (!table) return;
+    const query = box.value.trim().toLowerCase();
+    table.querySelectorAll("th[data-score]").forEach((header) => {
+      const hidden = !header.textContent.toLowerCase().includes(query);
+      for (const row of table.rows) row.cells[header.cellIndex].hidden = hidden;
+    });
+    const wrap = table.parentElement;
+    wrap.scrollLeft = query ? wrap.scrollWidth : 0;
+  });
 }
 """
 
@@ -335,7 +347,7 @@ def _about_text(by_id: dict[str, dict]) -> str:
     )
 
 
-def _summary(result: dict, model_name: str) -> str:
+def _summary(result: dict, model_name: str, *, list_missing: bool = True) -> str:
     lines = [
         f"**{model_name}**: covered {result['n_datasets_scored']}/"
         f"{result['n_datasets_total']} datasets",
@@ -351,7 +363,7 @@ def _summary(result: dict, model_name: str) -> str:
             "tasks you covered in full, and your scores always appear in each "
             "board's **per-task** table."
         )
-        if result["missing"]:
+        if result["missing"] and list_missing:
             lines.append(f"- missing from file: {result['missing']}")
         if result["incomplete"]:
             lines.append(f"- could not score: {result['incomplete']}")
@@ -503,7 +515,7 @@ def run_submission(
         )
     )
     if hvg_result is not None:
-        summary += "\n\n" + _summary(hvg_result, hvg_name(model))
+        summary += "\n\n" + _summary(hvg_result, hvg_name(model), list_missing=False)
     if not hvg_rows:
         summary += (
             f"\n\n⚠️ The `{hvg_name(model)}` entry could not be scored (our side), "

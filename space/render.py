@@ -290,10 +290,11 @@ def _df_to_table(
             if col in score_cols or col in RIGHT_COLUMNS
             else ""
         )
+        score = " data-score" if col in score_cols else ""
         head.append(
             f'<th class="pm-sort" data-sort-index="{index}" tabindex="0" '
             f'role="button" aria-sort="none" title="Sort by {escape(str(col))}"'
-            f"{align}>{name}</th>"
+            f"{score}{align}>{name}</th>"
         )
     body = []
     for idx, row in df.iterrows():
@@ -777,6 +778,8 @@ def _per_task_details(per_task: pd.DataFrame, by_id: dict, board: Board) -> str:
         f'</span><span class="pm-more-n">{board.n_tasks} tasks</span></summary>'
         '<p class="pm-note">Every submission, partial ones included. Read across a '
         "row. Scores show mean ± SD when repeat-level results are available.</p>"
+        '<input type="search" class="pm-find" placeholder="Find a model" '
+        'aria-label="Find a model">'
         f"{table}</details>"
     )
 

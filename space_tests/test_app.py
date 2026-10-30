@@ -129,6 +129,11 @@ def test_the_cite_button_opens_its_window():
     assert 'querySelector("#pm-cite-dialog")?.showModal()' in app.TABLE_SORT_JS
 
 
+def test_the_find_box_hides_the_score_columns_of_other_models():
+    assert 'event.target.closest(".pm-find")' in app.TABLE_SORT_JS
+    assert 'table.querySelectorAll("th[data-score]")' in app.TABLE_SORT_JS
+
+
 def test_owned_model_name_does_not_reveal_owner(monkeypatch):
     monkeypatch.setattr(app, "_results_frame", lambda: _ledger())
     monkeypatch.setattr(app, "_claimed_by", lambda df, model: "private-owner")
@@ -287,6 +292,15 @@ def test_hvg_failure_still_saves_the_plain_entry(monkeypatch):
     assert {row["model_name"] for row in persisted} == {"eva-rna-v1"}
     assert "eva-rna-v1 is now shown on the relevant boards" in summary
     assert "`eva-rna-v1 + HVG` entry could not be scored" in summary
+
+
+def test_the_hvg_entry_does_not_repeat_the_missing_datasets(monkeypatch):
+    partial = {**_result(), "full_coverage": False, "missing": ["d902"]}
+
+    summary = _evaluate(monkeypatch, lambda rows, token: None, result=partial)
+
+    assert "**eva-rna-v1 + HVG**: covered" in summary
+    assert summary.count("missing from file: ['d902']") == 1
 
 
 def test_hvg_tag_is_reserved(monkeypatch):
