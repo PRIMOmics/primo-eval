@@ -386,6 +386,16 @@ def test_per_task_scores_show_sd_only_when_repeats_are_available(registry, resul
     assert "Scores show mean ± SD when repeat-level results are available." in html
 
 
+def test_per_task_table_has_a_box_to_find_a_model(registry, results):
+    df = results(("eva", "t901", 0.7, "2026-01-01"))
+
+    per_task = _per_task(_view(registry, df, area="gastroenterology"))
+
+    assert '<input type="search" class="pm-find" placeholder="Find a model"' in per_task
+    assert re.search(r"<th [^>]*data-score[^>]*>eva</th>", per_task)
+    assert not re.search(r"<th [^>]*data-score[^>]*>Task</th>", per_task)
+
+
 def test_task_tooltip_discloses_repeated_collection_samples(registry, results):
     registry["t901"]["n_subjects"] = 20
     registry["t901"]["n_samples"] = 126
