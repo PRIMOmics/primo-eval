@@ -205,7 +205,7 @@ def test_per_task_exposes_sd_only_for_multiple_stored_repeats(registry, named, r
     standard_deviation, repeats = table.attrs["repeat_standard_deviations"][
         (0, "repeated")
     ]
-    assert standard_deviation == pytest.approx(0.1)
+    assert standard_deviation == pytest.approx(0.1414, abs=1e-4)
     assert repeats == 2
     assert len(table.attrs["repeat_standard_deviations"]) == 1
 

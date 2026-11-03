@@ -136,10 +136,10 @@ def _log_checks(verdicts: dict[str, str]) -> None:
 
 
 def _sd(repeat_scores: tuple[float, ...]) -> str:
-    """The spread over CV repeats, as on the leaderboard, or ``-`` for one repeat."""
+    """The spread over CV repeats, or ``-`` for a single repeat."""
     if len(repeat_scores) < 2:
         return "-"
-    return f"{np.std(repeat_scores):.3f}"
+    return f"{np.std(repeat_scores, ddof=1):.3f}"
 
 
 def _log_scores(result: dict, verdicts: dict[str, str], scored: list[dict]) -> None:

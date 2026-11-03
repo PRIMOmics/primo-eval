@@ -349,8 +349,8 @@ def test_the_report_lists_only_the_files_of_the_datasets_in_the_file(
     assert sorted(files) == ["d902/expression.h5ad", "datasets.yaml"]
 
 
-def test_the_spread_over_repeats_is_the_one_of_the_leaderboard():
-    assert cli._sd((0.8, 0.9)) == "0.050"
+def test_the_spread_over_repeats_is_the_sample_sd():
+    assert cli._sd((0.8, 0.9)) == "0.071"
     assert cli._sd((0.8,)) == "-"
 
 

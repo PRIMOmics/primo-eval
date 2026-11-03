@@ -377,11 +377,11 @@ def test_per_task_scores_show_sd_only_when_repeats_are_available(registry, resul
 
     html = _view(registry, df, area="gastroenterology")
 
-    assert '<span class="pm-sd" aria-hidden="true"> ± 0.100</span>' in html
+    assert '<span class="pm-sd" aria-hidden="true"> ± 0.141</span>' in html
     css = Path(render.__file__).with_name("primo.css").read_text()
     assert ".pm-table .pm-sd { display: inline;" in css
     assert 'data-sort-value="0.700"' in html
-    assert "Standard deviation across 2 repeats: 0.100" in html
+    assert "Standard deviation across 2 repeats: 0.141" in html
     assert html.count('class="pm-sd"') == 1
     assert "Scores show mean ± SD when repeat-level results are available." in html
 
