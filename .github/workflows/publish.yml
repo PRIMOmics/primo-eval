@@ -22,6 +22,8 @@ jobs:
         with:
           name: dist
           path: dist/
+      - run: uv run --isolated --no-project --with dist/*.whl primo --help
+      - run: unzip -l dist/*.whl primomics/public_tasks.yaml
 
   publish:
     needs: build
