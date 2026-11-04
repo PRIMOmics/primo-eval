@@ -1,6 +1,6 @@
 [project]
 name = "primomics"
-version = "0.1.6.dev0"
+version = "0.1.6"
 description = "Evaluation harness, task specs and baselines for the PRIMO benchmark"
 readme = "README.md"
 license = "Apache-2.0"
@@ -8,8 +8,8 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "anndata>=0.10",
-    "gradio-client>=1.0,<2",
-    "huggingface-hub>=0.33",
+    "gradio-client>=1.0,<3",
+    "huggingface-hub>=0.34",
     "joblib",
     "numpy",
     "pandas",
