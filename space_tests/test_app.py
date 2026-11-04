@@ -134,6 +134,19 @@ def test_the_find_box_hides_the_score_columns_of_other_models():
     assert 'table.querySelectorAll("th[data-score]")' in app.TABLE_SORT_JS
 
 
+def test_a_top_bar_link_switches_the_page_without_a_reload():
+    assert '#pm-pages button[role="tab"]' in app.TABLE_SORT_JS
+    assert "window.history.pushState" in app.TABLE_SORT_JS
+    assert '"popstate"' in app.TABLE_SORT_JS
+
+
+def test_a_link_to_another_board_version_still_reloads():
+    assert (
+        'target.searchParams.get("version") !== url.searchParams.get("version")'
+        in app.TABLE_SORT_JS
+    )
+
+
 def test_owned_model_name_does_not_reveal_owner(monkeypatch):
     monkeypatch.setattr(app, "_results_frame", lambda: _ledger())
     monkeypatch.setattr(app, "_claimed_by", lambda df, model: "private-owner")
@@ -314,10 +327,10 @@ def test_hvg_tag_is_reserved(monkeypatch):
     assert "is reserved" in summary
 
 
-def test_the_interface_builds_as_on_the_space():
-    """Outside a Space, the Gradio login needs a local token, so the env fakes a Space.
+def _check_the_space_build(check: str) -> None:
+    """Build the interface in a fresh Python, then run ``check`` on ``demo``.
 
-    The web form and the ``/submit`` endpoint share one queue.
+    Outside a Space, the Gradio login needs a local token, so the env fakes a Space.
     """
     space_env = {
         "SYSTEM": "spaces",
@@ -327,16 +340,29 @@ def test_the_interface_builds_as_on_the_space():
         "OAUTH_SCOPES": "openid profile",
         "OPENID_PROVIDER_URL": "https://huggingface.co",
     }
-    script = (
-        "import app; demo = app.build_demo(); "
-        "queues = {fn.api_name: fn.concurrency_id for fn in demo.fns.values()}; "
-        "assert queues['submit'] == queues['evaluate'] == app.SUBMISSIONS, queues"
-    )
     subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", f"import app; demo = app.build_demo(); {check}"],
         cwd=Path(app.__file__).parent,
         env={**os.environ, **space_env},
         check=True,
+    )
+
+
+def test_the_interface_builds_as_on_the_space():
+    """The web form and the ``/submit`` endpoint share one queue."""
+    _check_the_space_build(
+        "queues = {fn.api_name: fn.concurrency_id for fn in demo.fns.values()}; "
+        "assert queues['submit'] == queues['evaluate'] == app.SUBMISSIONS, queues"
+    )
+
+
+def test_the_top_bar_links_reload_after_an_evaluation():
+    assert "window.pmReload" in app.TABLE_SORT_JS
+    _check_the_space_build(
+        "fns = list(demo.fns.values()); "
+        "evaluate = next(fn for fn in fns if fn.api_name == 'evaluate'); "
+        "after = [fn.js for fn in fns if fn.trigger_after == evaluate._id]; "
+        "assert app.RELOAD_AFTER_EVALUATION_JS in after, after"
     )
 
 

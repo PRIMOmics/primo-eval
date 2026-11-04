@@ -117,7 +117,8 @@ Release steps:
 1. Run `uv version 0.2.0`: it sets the version to `0.2.0` in `pyproject.toml` and
    `uv.lock`. Then open a PR.
 2. After the merge, tag the merge commit `v0.2.0` and create a GitHub Release. Its
-   notes start with "Scores change" or "Scores do not change".
+   notes start with "Scores change" or "Scores do not change". The tag starts
+   `.github/workflows/publish.yml`, which publishes the package on PyPI.
 3. In the next PR, run `uv version 0.2.1.dev0` (the next patch with `.dev0`). This
    change does not need a PR of its own. `primo evaluate` writes this version into
    `results.json`, so a result made from `main` never carries the number of a release.

@@ -15,10 +15,11 @@ Two rules hold everywhere:
   link. Private legacy ``hf_username`` values stay hidden. Public strings and
   links are validated and escaped before rendering.
 
-Pages are reload-based ``<a href="?tab=name">`` links in the top bar; the
-leaderboard view is picked with Gradio pills in ``app.py``. On a closed board
-version, every link adds ``&version=<number>`` so the visitor stays on it, except
-Submit: a submission always goes to the current version.
+Pages are ``<a href="?tab=name">`` links in the top bar; the page script in
+``app.py`` switches the page without a reload when the link stays on the same board
+version. The leaderboard view is picked with Gradio pills in ``app.py``. On a closed
+board version, every link adds ``&version=<number>`` so the visitor stays on it,
+except Submit: a submission always goes to the current version.
 """
 
 import math
@@ -108,7 +109,7 @@ def evaluation_status() -> str:
 
 
 def _href(query: str, version: Version = CURRENT) -> str:
-    """A reload link that stays on ``version``; the current one needs no tag."""
+    """A page link that stays on ``version``; the current one needs no tag."""
     if version != CURRENT:
         query = f"{query}&{VERSION_PARAM}={version.number}"
     return escape(f"?{query}")

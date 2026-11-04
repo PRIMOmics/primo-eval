@@ -6,7 +6,9 @@ tested?"), Submit ("how do I enter?"), Contribute ("what is missing, and how do
 I add it?"), Method ("can I trust this?"). Every page is addressable --
 ``?tab=contribute`` opens a tab and ``?modality=bulk-rna&area=oncology&task=all``
 a view; old ``?board=<slug>`` links still open their view. The tab strip is
-hidden in CSS; the top bar is the navigation.
+hidden in CSS; the top bar is the navigation. Its links switch the page in the
+browser, with no reload and no fetch. A link to another board version reloads, and
+so does every link after an evaluation, so the new model shows on the leaderboard.
 ``&version=<number>`` shows a closed board version, read-only: its registry at
 its pinned commits and the rows it scored. Submit always shows the current one.
 
@@ -165,6 +167,7 @@ VIEW_URL_JS = """
   window.history.replaceState(null, "", url);
 }
 """
+RELOAD_AFTER_EVALUATION_JS = "() => { window.pmReload = true; }"
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
@@ -272,6 +275,43 @@ TABLE_SORT_JS = """
     });
     const wrap = table.parentElement;
     wrap.scrollLeft = query ? wrap.scrollWidth : 0;
+  });
+
+  const showTab = (tab) => {
+    const button = Array.from(
+      document.querySelectorAll('#pm-pages button[role="tab"]')
+    ).find((candidate) => candidate.dataset.tabId === tab);
+    if (!button) return false;
+    button.click();
+    document.querySelectorAll(".pm-nav-links a").forEach((link) => {
+      const linkTab = new URL(link.href).searchParams.get("tab");
+      link.classList.toggle("pm-active", linkTab === tab);
+    });
+    return true;
+  };
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest('a[target="_self"][href^="?"]');
+    if (!link || window.pmReload || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = new URL(link.href);
+    const url = new URL(window.location.href);
+    if (target.searchParams.get("version") !== url.searchParams.get("version")) return;
+    const tab = target.searchParams.get("tab");
+    if (!showTab(tab)) return;
+    event.preventDefault();
+    if (url.searchParams.get("tab") !== tab) {
+      url.searchParams.set("tab", tab);
+      window.history.pushState(null, "", url);
+    }
+    window.scrollTo(0, 0);
+  });
+  window.addEventListener("popstate", () => {
+    if (window.pmReload) {
+      window.location.reload();
+      return;
+    }
+    const tab = new URL(window.location.href).searchParams.get("tab");
+    showTab(tab) || showTab("leaderboard");
   });
 }
 """
@@ -845,6 +885,7 @@ def build_demo() -> gr.Blocks:
             status_html,
             show_progress="hidden",
         )
+        evaluation_event.then(None, js=RELOAD_AFTER_EVALUATION_JS)
         modality_in.change(_download_help, modality_in, download_md)
 
         pills = [modality_f, area_f, task_f, hvg_f, public_f]
