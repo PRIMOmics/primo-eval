@@ -250,6 +250,8 @@ footer { display: none !important; }
 #pm-site .pm-more[open] > summary::before { content: "−"; }
 .pm-more-n { font: 500 13.5px/1 var(--pm-f-mono); color: var(--pm-ink-3); }
 #pm-site .pm-more > .pm-note { margin: 8px 0 14px; }
+#pm-site .pm-more .pm-find { width: min(100%, 280px); margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--pm-line); border-radius: 10px; background: var(--pm-surface); font: 400 14px/1.3 var(--pm-f-body); color: var(--pm-ink); }
+#pm-site .pm-more .pm-find:focus { outline: 2px solid var(--pm-accent-2); outline-offset: 0; }
 #pm-site .pm-more .pm-table td { white-space: nowrap; padding: 9px 10px; font-size: 13.5px; }
 #pm-site .pm-more .pm-table th { padding: 14px 10px 10px; font-size: 11.5px; }
 #pm-site .pm-more .pm-table th:first-child, #pm-site .pm-more .pm-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--pm-surface); }

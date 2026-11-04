@@ -404,6 +404,20 @@ def test_submit_dry_run_sends_nothing(
     assert "ready to submit" in caplog.text
 
 
+def test_submit_prints_the_reply_of_the_space_without_markdown(
+    fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
+):
+    fake_space.reply = {
+        "status": "published",
+        "message": "**model-901**: covered 2/2 datasets. So is `model-901 + HVG`.",
+        "submission_id": "s-901",
+    }
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    assert _submit(submission, local_data) == 0
+    assert "model-901: covered 2/2 datasets. So is model-901 + HVG." in caplog.text
+
+
 def test_submit_lists_the_datasets_missing_from_the_file(
     fake_hub, fake_space, logged_in, public_tasks, local_data, tmp_path, caplog
 ):

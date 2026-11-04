@@ -536,7 +536,10 @@ def per_task_table(
             scores[(task_id, model)] = float(r["score"])
             repeats = _stored_repeat_scores(r)
             if len(repeats) > 1:
-                repeat_sd[(task_id, model)] = (float(np.std(repeats)), len(repeats))
+                repeat_sd[(task_id, model)] = (
+                    float(np.std(repeats, ddof=1)),
+                    len(repeats),
+                )
     if not scores:
         return pd.DataFrame(columns=EMPTY_PER_TASK_COLUMNS)
 

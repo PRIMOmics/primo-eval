@@ -312,7 +312,7 @@ def _submit(args: argparse.Namespace) -> None:
         notes=args.notes,
         space=args.space,
     )
-    logger.info("%s", reply["message"])
+    logger.info("%s", reply["message"].replace("**", "").replace("`", ""))
     if reply["status"] == REFUSED:
         raise SubmissionError("the Space refused the submission")
     if reply["status"] != PUBLISHED:
