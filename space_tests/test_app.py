@@ -366,6 +366,22 @@ def test_the_top_bar_links_reload_after_an_evaluation():
     )
 
 
+def test_the_page_shows_one_loader_until_the_first_page_load_ends():
+    css = Path(app.CSS_PATH).read_text()
+
+    assert "html:not(.pm-ready) #pm-site { visibility: hidden; }" in css
+    assert "html.pm-ready #pm-loader { display: none !important; }" in css
+    _check_the_space_build(
+        "blocks = demo.blocks.values(); "
+        "assert any(getattr(b, 'elem_id', None) == 'pm-loader' for b in blocks); "
+        "fns = list(demo.fns.values()); "
+        "init = next(fn for fn in fns if fn.name == '_init'); "
+        "assert init.show_progress == 'hidden', init.show_progress; "
+        "after = [fn.js for fn in fns if fn.trigger_after == init._id]; "
+        "assert app.PAGE_READY_JS in after, after"
+    )
+
+
 def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
     monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))

@@ -85,6 +85,7 @@ from render import (
     hero_html,
     history_html,
     nav_html,
+    page_loader,
     render_tasks,
     render_view,
 )
@@ -168,6 +169,7 @@ VIEW_URL_JS = """
 }
 """
 RELOAD_AFTER_EVALUATION_JS = "() => { window.pmReload = true; }"
+PAGE_READY_JS = '() => document.documentElement.classList.add("pm-ready")'
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
@@ -742,6 +744,7 @@ def _init(request: gr.Request):
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="PRIMO Benchmark", fill_width=True) as demo:
         page_state = gr.State(None)
+        gr.HTML(page_loader(), padding=False, elem_id="pm-loader")
         with gr.Column(elem_id="pm-site"):
             nav = gr.HTML(padding=False)
             with gr.Tabs(elem_id="pm-pages") as pages:
@@ -917,7 +920,8 @@ def build_demo() -> gr.Blocks:
                 history,
                 cta,
             ],
-        )
+            show_progress="hidden",
+        ).then(None, js=PAGE_READY_JS)
     return demo
 
 

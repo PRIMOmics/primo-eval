@@ -75,6 +75,20 @@ PUBLIC_CHIP = (
 BASELINE_CHIP = (
     '<span class="pm-tag pm-tag--base" title="Our reference model">Baseline</span>'
 )
+MARK_SRC = "/gradio_api/file=assets/primo-mark.webp"
+SPINNER = (
+    '<svg class="pm-spinner" aria-hidden="true" viewBox="0 0 24 24">'
+    '<circle cx="12" cy="12" r="9"></circle>'
+    '<path d="M12 3a9 9 0 0 1 9 9"></path></svg>'
+)
+
+
+def page_loader() -> str:
+    """Render the one loader shown until the first page load fills the pages."""
+    return (
+        '<div class="pm-loader" role="status" aria-label="Loading the leaderboard">'
+        f'<img src="{MARK_SRC}" alt="">{SPINNER}</div>'
+    )
 
 
 def evaluation_confirmation() -> str:
@@ -100,9 +114,7 @@ def evaluation_status() -> str:
     """Render the progress message shown while an evaluation runs."""
     return (
         '<div class="pm-evaluation-status" role="status" aria-live="polite">'
-        '<svg class="pm-spinner" aria-hidden="true" viewBox="0 0 24 24">'
-        '<circle cx="12" cy="12" r="9"></circle>'
-        '<path d="M12 3a9 9 0 0 1 9 9"></path></svg>'
+        f"{SPINNER}"
         "<span>Your embeddings are being evaluated... This can take a few "
         "minutes.</span></div>"
     )
@@ -598,7 +610,7 @@ def nav_html(active_tab: str, version: Version = CURRENT) -> str:
     return (
         '<header class="pm-nav"><a class="pm-logo" target="_self" '
         f'href="{_href("tab=leaderboard", version)}" aria-label="PRIMO leaderboard">'
-        '<img src="/gradio_api/file=assets/primo-mark.webp" alt="">'
+        f'<img src="{MARK_SRC}" alt="">'
         "<b>PRIMO</b></a>"
         '<div class="pm-nav-right">'
         f'<nav class="pm-nav-links" aria-label="Main">{"".join(links)}</nav>'
