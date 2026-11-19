@@ -9,7 +9,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
-from boards import ALL
+from boards import ALL, build_boards
 from versions import CURRENT
 
 from .conftest import CLOSED, REGISTRY
@@ -220,6 +220,8 @@ def _init(monkeypatch, registry, boards, **query):
     monkeypatch.setattr(
         app, "_page_state", lambda version: (registry, boards, empty, version)
     )
+    monkeypatch.setattr(app, "results_hash", lambda token: "hash-1")
+    monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
     return app._init(SimpleNamespace(query_params=query))
 
@@ -261,6 +263,114 @@ def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
 
 def test_a_pill_clicked_before_the_page_loads_changes_nothing():
     assert app._render_view(None, "bulk-rna", ALL, ALL, "show", "show") == "skip"
+
+
+def _counted_builds(monkeypatch, registry: dict) -> list:
+    """Record each build of the pages, from ``registry`` and no results."""
+    builds = []
+    empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
+
+    def page_state(version):
+        builds.append(version)
+        return registry, build_boards(registry), empty, version
+
+    monkeypatch.setattr(app, "_page_state", page_state)
+    monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
+    return builds
+
+
+def _no_hash(token):
+    raise ConnectionError("Hub unavailable")
+
+
+def test_the_pages_are_built_again_only_when_the_results_file_changes(monkeypatch):
+    builds = _counted_builds(monkeypatch, dict(REGISTRY))
+    hashes = iter(["a", "a", "b"])
+    monkeypatch.setattr(app, "results_hash", lambda token: next(hashes))
+
+    first, second, third = [app._pages(CURRENT) for _ in range(3)]
+
+    assert second is first
+    assert third is not first
+    assert len(builds) == 2
+
+
+def test_each_version_keeps_its_own_pages(monkeypatch):
+    builds = _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+
+    current, closed = app._pages(CURRENT), app._pages(CLOSED)
+
+    assert current.state[3] == CURRENT
+    assert closed.state[3] == CLOSED
+    assert app._pages(CURRENT) is current
+    assert len(builds) == 2
+
+
+def test_pages_without_a_registry_are_not_kept(monkeypatch):
+    builds = _counted_builds(monkeypatch, {})
+    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+
+    app._pages(CURRENT)
+    app._pages(CURRENT)
+
+    assert len(builds) == 2
+
+
+def test_the_last_pages_show_when_the_hub_gives_no_hash(monkeypatch):
+    builds = _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    kept = app._pages(CURRENT)
+    monkeypatch.setattr(app, "results_hash", _no_hash)
+
+    assert app._pages(CURRENT) is kept
+    assert len(builds) == 1
+
+
+def test_the_last_pages_show_when_a_new_build_fails(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    kept = app._pages(CURRENT)
+    builds = _counted_builds(monkeypatch, {})
+    app.PAGES_BY_VERSION[CURRENT.number] = kept
+    monkeypatch.setattr(app, "results_hash", lambda token: "b")
+
+    assert app._pages(CURRENT) is kept
+    assert app._pages(CURRENT) is kept
+    assert len(builds) == 2
+
+
+def test_pages_built_without_a_hash_are_not_kept(monkeypatch):
+    builds = _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", _no_hash)
+
+    app._pages(CURRENT)
+    app._pages(CURRENT)
+
+    assert len(builds) == 2
+    assert app.PAGES_BY_VERSION == {}
+
+
+def test_a_view_is_rendered_once_per_results_file(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    rendered = []
+    monkeypatch.setattr(
+        app, "render_view", lambda *args: rendered.append(args) or "view"
+    )
+    pages = app._pages(CURRENT)
+
+    for hvg in ("show", "show", "hide"):
+        assert app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show") == "view"
+
+    assert len(rendered) == 2
+
+
+def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards):
+    state = _init(monkeypatch, registry, boards)[9]
+
+    assert isinstance(state, app.Pages)
+    assert state.state[0] is registry
 
 
 def test_the_public_tasks_pill_shows_only_when_a_task_is_public(

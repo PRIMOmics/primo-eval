@@ -37,15 +37,19 @@ Failures are surfaced by who owns them: a bad file tells the submitter exactly
 what to fix; an evaluator-side failure says "our side, please retry" and logs
 the traceback rather than blaming the submission.
 
-A page load is ONE fetch: ``_init`` pulls the registry, the boards and the
-persisted results once and threads that state into every page, rather than each
-page fetching for itself. The state stays in the session, so a click on a pill
-re-renders the view from it, with no reload and no new fetch.
+The Space keeps the pages it builds in memory: the registry, the boards, the
+persisted results and their HTML. A page load asks the Hub only for the hash of
+the results file, and builds the pages again when it changed. Each view is
+rendered once per results file, for a page load or a click on a pill, with no
+reload and no new fetch. Until the first page load ends, one loader stands in
+for the pages.
 """
 
 import os
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -105,6 +109,7 @@ from results import (
     hvg_name,
     owner_of,
     read_results,
+    results_hash,
     task_rows,
     version_rows,
 )
@@ -147,6 +152,7 @@ DEFAULT_MODALITY = "bulk-rna"
 SHOW = "show"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
+VIEW_CACHE_SIZE = 128
 
 THEME = gr.themes.Base(
     font=[gr.themes.LocalFont("IBM Plex Sans", weights=(400, 700)), "sans-serif"],
@@ -361,11 +367,10 @@ PageState = tuple[dict[str, dict], list[Board], pd.DataFrame, Version]
 
 
 def _page_state(version: Version = CURRENT) -> PageState:
-    """Registry, boards and results of ``version`` -- one fetch per render.
+    """Registry, boards and results of ``version``, fetched from the Hub.
 
     A failed fetch yields empty structures so the page renders a "come back
-    later" state instead of a stack trace. Every page is built from one of these,
-    threaded through rather than refetched, so a page load is one round trip.
+    later" state instead of a stack trace.
     """
     try:
         by_id = _registry_by_id(version)
@@ -387,6 +392,58 @@ def _about_text(by_id: dict[str, dict]) -> str:
     return _page_text("about").replace(
         "{repositories}", " and ".join(repositories) or "public archives"
     )
+
+
+@dataclass(eq=False)
+class Pages:
+    """The pages built from one state of the results file, kept between visits."""
+
+    scores: str
+    state: PageState
+    hero: str
+    tasks: str
+    about: str
+    history: str
+    cta: str
+
+
+PAGES_BY_VERSION: dict[str, Pages] = {}
+
+
+def _built_pages(state: PageState, scores: str) -> Pages:
+    """Render the HTML that the query does not change, once per state."""
+    by_id, boards, df, version = state
+    return Pages(
+        scores=scores,
+        state=state,
+        hero=hero_html(boards, df, version),
+        tasks=render_tasks(by_id),
+        about=_about_text(by_id),
+        history=history_html(df, version),
+        cta=cta_html(boards, version),
+    )
+
+
+def _pages(version: Version) -> Pages:
+    """The pages of ``version``, built again only when the results file changed.
+
+    If the Hub gives no hash, or the new pages have no registry, the pages built
+    last are shown. Pages without a registry are never kept, so the next visit
+    fetches again.
+    """
+    kept = PAGES_BY_VERSION.get(version.number)
+    try:
+        scores = results_hash(TOKEN)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        return kept or _built_pages(_page_state(version), "")
+    if kept is not None and kept.scores == scores:
+        return kept
+    pages = _built_pages(_page_state(version), scores)
+    if not pages.state[0]:
+        return kept or pages
+    PAGES_BY_VERSION[version.number] = pages
+    return pages
 
 
 def _summary(result: dict, model_name: str, *, list_missing: bool = True) -> str:
@@ -675,16 +732,12 @@ def _view_name(by_id: dict[str, dict], modality: str, area: str, category: str) 
     )
 
 
-def _render_view(
-    state: PageState, modality: str, area: str, category: str, hvg: str, public: str
+@lru_cache(maxsize=VIEW_CACHE_SIZE)
+def _view_html(
+    pages: Pages, modality: str, area: str, category: str, hvg: str, public: str
 ) -> str:
-    """The tables of the view the pills select, on the version on screen.
-
-    A pill clicked before the page has loaded has no state yet, and changes nothing.
-    """
-    if state is None:
-        return gr.skip()
-    by_id, _, df, _ = state
+    """The tables of one view, rendered once per state of the results file."""
+    by_id, _, df, _ = pages.state
     board = view_board(by_id, modality, area, category)
     if public == HIDE:
         board = without_public(board, by_id)
@@ -692,13 +745,25 @@ def _render_view(
     return render_view(board, df, by_id, name, hvg != HIDE)
 
 
-def _on_modality(state: PageState, modality: str, hvg: str, public: str):
+def _render_view(
+    pages: Pages | None, modality: str, area: str, category: str, hvg: str, public: str
+) -> str:
+    """The tables of the view the pills select, on the version on screen.
+
+    A pill clicked before the page has loaded has no pages yet, and changes nothing.
+    """
+    if pages is None:
+        return gr.skip()
+    return _view_html(pages, modality, area, category, hvg, public)
+
+
+def _on_modality(pages: Pages, modality: str, hvg: str, public: str):
     """A new modality brings its own area and task pills, both back on All."""
-    by_id = state[0]
+    by_id = pages.state[0]
     return (
         gr.Radio(choices=area_choices(by_id, modality), value=ALL),
         gr.Radio(choices=category_choices(by_id, modality), value=ALL),
-        _render_view(state, modality, ALL, ALL, hvg, public),
+        _render_view(pages, modality, ALL, ALL, hvg, public),
     )
 
 
@@ -711,14 +776,14 @@ def _viewed_version(params: dict) -> Version:
 
 
 def _init(request: gr.Request):
-    """Render every page from one fetch, on the tab and the view the query asks.
+    """Fill every page from the kept pages, on the tab and the view the query asks.
 
-    The fetched state is returned too, so a click on a pill re-renders the view
-    without a second round trip.
+    The pages are returned too, so a click on a pill shows its view without a
+    new fetch.
     """
     params = dict(request.query_params) if request else {}
-    state = _page_state(_viewed_version(params))
-    by_id, boards, df, version = state
+    pages = _pages(_viewed_version(params))
+    by_id, boards, _, version = pages.state
     tab = _landing_tab(params)
     modality, area, category = _initial_view(params, by_id, boards)
     hvg = HIDE if params.get("hvg") == HIDE else SHOW
@@ -726,18 +791,18 @@ def _init(request: gr.Request):
     return (
         gr.Tabs(selected=tab),
         nav_html(tab, version),
-        hero_html(boards, df, version),
-        _render_view(state, modality, area, category, hvg, public),
+        pages.hero,
+        _render_view(pages, modality, area, category, hvg, public),
         gr.Radio(choices=modality_choices(by_id), value=modality),
         gr.Radio(choices=area_choices(by_id, modality), value=area),
         gr.Radio(choices=category_choices(by_id, modality), value=category),
         gr.Radio(value=hvg),
         gr.Radio(value=public, visible=any(t.get(PUBLIC) for t in by_id.values())),
-        state,
-        render_tasks(by_id),
-        _about_text(by_id),
-        history_html(df, version),
-        cta_html(boards, version),
+        pages,
+        pages.tasks,
+        pages.about,
+        pages.history,
+        pages.cta,
     )
 
 

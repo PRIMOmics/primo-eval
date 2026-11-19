@@ -421,6 +421,18 @@ def read_results(token: str | None, revision: str | None = None) -> pd.DataFrame
     )
 
 
+def results_hash(token: str | None) -> str:
+    """The hash of the results file on the Hub, read with one request."""
+    from huggingface_hub import get_hf_file_metadata, hf_hub_url
+
+    etag = get_hf_file_metadata(
+        hf_hub_url(RESULTS_REPO, RESULTS_FILE, repo_type="dataset"), token=token
+    ).etag
+    if not etag:
+        raise EvaluatorError(f"the Hub gave no hash for {RESULTS_FILE}")
+    return etag
+
+
 def append_results(rows: list[dict], token: str | None) -> None:
     """Append scored rows to the leaderboard, keeping the history intact."""
     if not rows:

@@ -32,6 +32,7 @@ from results import (
     fetch_hvg_reference,
     owner_of,
     read_csv,
+    results_hash,
     task_rows,
     version_rows,
     with_author_submission_flag,
@@ -244,6 +245,34 @@ def test_scored_rows_are_tagged_with_the_current_version():
     }
     rows = task_rows("m", result, "2026-01-01", "s", {OWNER: "alice"})
     assert [row[VERSION] for row in rows] == [CURRENT.number]
+
+
+def test_the_results_hash_is_the_etag_of_the_results_file(monkeypatch):
+    asked = []
+
+    def metadata(url, token):
+        asked.append((url, token))
+        return SimpleNamespace(etag="abc123", commit_hash="c" * 40)
+
+    monkeypatch.setattr(huggingface_hub, "get_hf_file_metadata", metadata)
+
+    assert results_hash("secret") == "abc123"
+    [(url, token)] = asked
+    assert url.endswith(
+        f"/datasets/PRIMOmics/primo-results/resolve/main/{RESULTS_FILE}"
+    )
+    assert token == "secret"
+
+
+def test_a_results_file_without_a_hash_is_our_error(monkeypatch):
+    monkeypatch.setattr(
+        huggingface_hub,
+        "get_hf_file_metadata",
+        lambda url, token: SimpleNamespace(etag=None, commit_hash=None),
+    )
+
+    with pytest.raises(EvaluatorError):
+        results_hash(None)
 
 
 def test_versions_are_read_back_as_text(tmp_path, monkeypatch):
