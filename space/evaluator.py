@@ -1345,12 +1345,13 @@ def public_task_ids_from_manifest(path: str | Path) -> set[str]:
 def fetch_public_task_ids(
     token: str | None = None, revision: str = CURRENT.data
 ) -> set[str]:
-    """Download the public task ids; none until published or if the fetch fails.
+    """Download the public task ids; none until the manifest is published.
 
-    Losing the Public tags beats blanking every page over a Hub hiccup.
+    A failed fetch raises: the Space keeps the pages it builds, so pages without
+    their Public tags would stay until the scores change.
     """
     from huggingface_hub import hf_hub_download
-    from huggingface_hub.utils import EntryNotFoundError
+    from huggingface_hub.errors import RemoteEntryNotFoundError
 
     try:
         path = hf_hub_download(
@@ -1360,12 +1361,9 @@ def fetch_public_task_ids(
             token=token,
             revision=revision,
         )
-        return public_task_ids_from_manifest(path)
-    except EntryNotFoundError:
+    except RemoteEntryNotFoundError:
         return set()
-    except Exception:  # noqa: BLE001
-        logging.warning("public task manifest unreadable; no task tagged public")
-        return set()
+    return public_task_ids_from_manifest(path)
 
 
 def manifest_ids(manifest: list[dict], modality: str | None = None) -> set[str]:

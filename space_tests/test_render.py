@@ -22,6 +22,7 @@ from render import (
     hero_html,
     history_html,
     nav_html,
+    page_loader,
     render_tasks,
     render_view,
     version_notice,
@@ -658,3 +659,12 @@ def test_evaluation_status_announces_that_scoring_is_in_progress():
     assert "<circle" in html
     assert "<path" in html
     assert "Your embeddings are being evaluated... This can take a few minutes." in html
+
+
+def test_the_page_loader_shows_the_mark_and_a_spinner():
+    html = page_loader()
+
+    assert 'class="pm-loader" role="status"' in html
+    assert 'aria-label="Loading the leaderboard"' in html
+    assert 'src="/gradio_api/file=assets/primo-mark.webp"' in html
+    assert 'class="pm-spinner" aria-hidden="true"' in html
