@@ -679,6 +679,17 @@ def test_a_pill_click_fades_the_board_until_its_view_arrives():
     )
 
 
+def test_a_failed_pill_click_clears_the_fade():
+    _check_the_space_build(
+        "fns = list(demo.fns.values()); "
+        "pills = [fn for fn in fns if fn.name in ('_on_modality', '_render_view')]; "
+        "failure = {fn.trigger_after: fn.js for fn in fns "
+        "if fn.trigger_only_on_failure}; "
+        "steps = [failure.get(fn._id) for fn in pills]; "
+        "assert steps == [app.CLEAR_LOADING_JS] * 2, steps"
+    )
+
+
 def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
     monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))

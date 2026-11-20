@@ -181,6 +181,7 @@ VIEW_URL_JS = """
 """
 RELOAD_AFTER_EVALUATION_JS = "() => { window.pmReload = true; }"
 PAGE_READY_JS = '() => document.documentElement.classList.add("pm-ready")'
+CLEAR_LOADING_JS = '() => document.documentElement.classList.remove("pm-loading")'
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
@@ -1014,15 +1015,15 @@ def build_demo() -> gr.Blocks:
         modality_in.change(_download_help, modality_in, download_md)
 
         pills = [modality_f, area_f, task_f, hvg_f, public_f]
-        modality_f.input(
+        modality_event = modality_f.input(
             _on_modality,
             [page_state, modality_f, hvg_f, public_f],
             [area_f, task_f, board_html],
             show_progress="hidden",
             queue=False,
             trigger_mode="always_last",
-        ).then(None, pills, None, js=VIEW_URL_JS)
-        gr.on(
+        )
+        pill_event = gr.on(
             [pill.input for pill in pills[1:]],
             _render_view,
             [page_state, *pills],
@@ -1030,7 +1031,10 @@ def build_demo() -> gr.Blocks:
             show_progress="hidden",
             queue=False,
             trigger_mode="always_last",
-        ).then(None, pills, None, js=VIEW_URL_JS)
+        )
+        for event in (modality_event, pill_event):
+            event.then(None, pills, None, js=VIEW_URL_JS)
+            event.failure(None, js=CLEAR_LOADING_JS)
         demo.load(
             _init,
             None,
