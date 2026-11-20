@@ -266,16 +266,17 @@ def read_csv(
 ) -> pd.DataFrame:
     """One CSV of the private results dataset, at ``revision`` or the latest commit.
 
-    An absent file is an empty table.
+    An absent file is an empty table. A failed Hub request raises, so an append
+    never replaces the file with its new rows alone.
     """
     from huggingface_hub import hf_hub_download
-    from huggingface_hub.utils import EntryNotFoundError, RepositoryNotFoundError
+    from huggingface_hub.errors import RemoteEntryNotFoundError, RepositoryNotFoundError
 
     try:
         path = hf_hub_download(
             RESULTS_REPO, filename, repo_type="dataset", token=token, revision=revision
         )
-    except (RepositoryNotFoundError, EntryNotFoundError):
+    except (RepositoryNotFoundError, RemoteEntryNotFoundError):
         return pd.DataFrame(columns=columns)
     return pd.read_csv(path, dtype={VERSION: str})
 
