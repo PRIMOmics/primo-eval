@@ -164,8 +164,11 @@ THEME = gr.themes.Base(
 )
 
 VIEW_URL_JS = """
-(modality, area, task, hvg, pub) => {
-  document.documentElement.classList.remove("pm-loading");
+(modality, area, task, hvg, pub, board) => {
+  const view = [modality, area, task, hvg, pub].join("|");
+  if (board?.includes(`data-view="${view}"`)) {
+    document.documentElement.classList.remove("pm-loading");
+  }
   const url = new URL(window.location.href);
   const values = { modality, area, task, hvg, public: pub };
   const defaults = {
@@ -751,13 +754,15 @@ def _view_name(by_id: dict[str, dict], modality: str, area: str, category: str) 
 def _view_html(
     pages: Pages, modality: str, area: str, category: str, hvg: str, public: str
 ) -> str:
-    """The tables of one view, rendered once per state of the results file."""
+    """The tables of one view after a marker of its pills, once per results file."""
     by_id, _, df, _ = pages.state
     board = view_board(by_id, modality, area, category)
     if public == HIDE:
         board = without_public(board, by_id)
     name = _view_name(by_id, modality, area, category)
-    return render_view(board, df, by_id, name, hvg != HIDE)
+    view = f"{modality}|{area}|{category}|{hvg}|{public}"
+    tables = render_view(board, df, by_id, name, hvg != HIDE)
+    return f'<span hidden data-view="{view}"></span>{tables}'
 
 
 def _render_view(
@@ -1033,7 +1038,7 @@ def build_demo() -> gr.Blocks:
             trigger_mode="always_last",
         )
         for event in (modality_event, pill_event):
-            event.then(None, pills, None, js=VIEW_URL_JS)
+            event.then(None, [*pills, board_html], None, js=VIEW_URL_JS)
             event.failure(None, js=CLEAR_LOADING_JS)
         demo.load(
             _init,

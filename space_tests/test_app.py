@@ -406,9 +406,21 @@ def test_a_view_is_rendered_once_per_results_file(monkeypatch):
     pages = app._pages(CURRENT)
 
     for hvg in ("show", "show", "hide"):
-        assert app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show") == "view"
+        html = app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show")
+        assert html.endswith("view")
 
     assert len(rendered) == 2
+
+
+def test_a_view_starts_with_a_marker_of_its_pills(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    monkeypatch.setattr(app, "render_view", lambda *args: "view")
+    pages = app._pages(CURRENT)
+
+    html = app._render_view(pages, "bulk-rna", ALL, ALL, "hide", "show")
+
+    assert html == '<span hidden data-view="bulk-rna|all|all|hide|show"></span>view'
 
 
 def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards):
@@ -482,7 +494,7 @@ def test_the_warm_up_renders_every_view_once(monkeypatch):
 
     app._render_every_view(pages)
     for view in views:
-        assert app._render_view(pages, *view) == "view"
+        assert app._render_view(pages, *view).endswith("view")
 
     assert len(set(views)) == len(views) == 4 * 4 * 2 * 2
     assert len(rendered) == len(views)
@@ -666,16 +678,24 @@ def test_a_pill_click_is_one_direct_request_and_the_last_click_wins():
     )
 
 
-def test_a_pill_click_fades_the_board_until_its_view_arrives():
+def test_the_board_fades_until_it_shows_the_view_of_the_pills():
     css = Path(app.CSS_PATH).read_text()
 
     assert 'event.target.closest("#pm-controls")' in app.TABLE_SORT_JS
     assert 'classList.add("pm-loading")' in app.TABLE_SORT_JS
+    assert '[modality, area, task, hvg, pub].join("|")' in app.VIEW_URL_JS
+    assert 'board?.includes(`data-view="${view}"`)' in app.VIEW_URL_JS
     assert 'classList.remove("pm-loading")' in app.VIEW_URL_JS
     assert "html.pm-loading #pm-board { opacity: .5;" in css
     _check_the_space_build(
-        "blocks = demo.blocks.values(); "
-        "assert any(getattr(b, 'elem_id', None) == 'pm-board' for b in blocks)"
+        "board = next(b for b in demo.blocks.values() "
+        "if getattr(b, 'elem_id', None) == 'pm-board'); "
+        "fns = list(demo.fns.values()); "
+        "names = ('_on_modality', '_render_view'); "
+        "pills = [fn._id for fn in fns if fn.name in names]; "
+        "steps = [fn for fn in fns "
+        "if fn.trigger_after in pills and fn.js == app.VIEW_URL_JS]; "
+        "assert [fn.inputs[-1]._id for fn in steps] == [board._id] * 2, steps"
     )
 
 
