@@ -41,11 +41,14 @@ The Space keeps the pages it builds in memory: the registry, the boards, the
 persisted results and their HTML. A page load asks the Hub only for the hash of
 the results file, and builds the pages again when it changed. Each view is
 rendered once per results file, for a page load or a click on a pill, with no
-reload and no new fetch. Until the first page load ends, one loader stands in
-for the pages.
+reload and no new fetch. After the first page load of new pages, a background
+thread renders every view, so a click on a pill finds its view ready. A click is
+one direct request, not a job in the queue, and of quick clicks only the last
+one runs. Until the first page load ends, one loader stands in for the pages.
 """
 
 import os
+import threading
 import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -152,7 +155,8 @@ DEFAULT_MODALITY = "bulk-rna"
 SHOW = "show"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
-VIEW_CACHE_SIZE = 128
+DEFAULT_VIEW = (DEFAULT_MODALITY, ALL, ALL, SHOW, SHOW)
+VIEW_CACHE_SIZE = 512
 
 THEME = gr.themes.Base(
     font=[gr.themes.LocalFont("IBM Plex Sans", weights=(400, 700)), "sans-serif"],
@@ -160,7 +164,11 @@ THEME = gr.themes.Base(
 )
 
 VIEW_URL_JS = """
-(modality, area, task, hvg, pub) => {
+(modality, area, task, hvg, pub, board) => {
+  const view = [modality, area, task, hvg, pub].join("|");
+  if (board?.includes(`data-view="${view}"`)) {
+    document.documentElement.classList.remove("pm-loading");
+  }
   const url = new URL(window.location.href);
   const values = { modality, area, task, hvg, public: pub };
   const defaults = {
@@ -176,6 +184,7 @@ VIEW_URL_JS = """
 """
 RELOAD_AFTER_EVALUATION_JS = "() => { window.pmReload = true; }"
 PAGE_READY_JS = '() => document.documentElement.classList.add("pm-ready")'
+CLEAR_LOADING_JS = '() => document.documentElement.classList.remove("pm-loading")'
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
@@ -284,6 +293,10 @@ TABLE_SORT_JS = """
     const wrap = table.parentElement;
     wrap.scrollLeft = query ? wrap.scrollWidth : 0;
   });
+  document.addEventListener("input", (event) => {
+    if (!event.target.closest("#pm-controls")) return;
+    document.documentElement.classList.add("pm-loading");
+  });
 
   const showTab = (tab) => {
     const button = Array.from(
@@ -364,6 +377,7 @@ def _registry_by_id(version: Version) -> dict[str, dict]:
 
 
 PageState = tuple[dict[str, dict], list[Board], pd.DataFrame, Version]
+View = tuple[str, str, str, str, str]
 
 
 def _page_state(version: Version = CURRENT, revision: str | None = None) -> PageState:
@@ -406,6 +420,7 @@ class Pages:
     about: str
     history: str
     cta: str
+    warm_up_started: bool = False
 
 
 PAGES_BY_VERSION: dict[str, Pages] = {}
@@ -739,13 +754,15 @@ def _view_name(by_id: dict[str, dict], modality: str, area: str, category: str) 
 def _view_html(
     pages: Pages, modality: str, area: str, category: str, hvg: str, public: str
 ) -> str:
-    """The tables of one view, rendered once per state of the results file."""
+    """The tables of one view after a marker of its pills, once per results file."""
     by_id, _, df, _ = pages.state
     board = view_board(by_id, modality, area, category)
     if public == HIDE:
         board = without_public(board, by_id)
     name = _view_name(by_id, modality, area, category)
-    return render_view(board, df, by_id, name, hvg != HIDE)
+    view = f"{modality}|{area}|{category}|{hvg}|{public}"
+    tables = render_view(board, df, by_id, name, hvg != HIDE)
+    return f'<span hidden data-view="{view}"></span>{tables}'
 
 
 def _render_view(
@@ -758,6 +775,46 @@ def _render_view(
     if pages is None:
         return gr.skip()
     return _view_html(pages, modality, area, category, hvg, public)
+
+
+def _views_of(by_id: dict[str, dict]) -> list[View]:
+    """Every combination of the pills, the fewest clicks from the default first."""
+    views = [
+        (modality, area, category, hvg, public)
+        for _, modality in modality_choices(by_id)
+        for _, area in area_choices(by_id, modality)
+        for _, category in category_choices(by_id, modality)
+        for hvg in (SHOW, HIDE)
+        for public in (SHOW, HIDE)
+    ]
+    return sorted(
+        views,
+        key=lambda view: sum(pill != usual for pill, usual in zip(view, DEFAULT_VIEW)),
+    )
+
+
+def _is_kept(pages: Pages) -> bool:
+    """Are ``pages`` the ones kept for their board version?"""
+    return PAGES_BY_VERSION.get(pages.state[3].number) is pages
+
+
+def _render_every_view(pages: Pages) -> None:
+    """Render every view of ``pages`` into the cache, while they stay kept."""
+    for view in _views_of(pages.state[0]):
+        if not _is_kept(pages):
+            return
+        try:
+            _view_html(pages, *view)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+
+
+def _warm_up(pages: Pages) -> None:
+    """Render every view of newly kept ``pages`` in a background thread, once."""
+    if pages.warm_up_started or not _is_kept(pages):
+        return
+    pages.warm_up_started = True
+    threading.Thread(target=_render_every_view, args=(pages,), daemon=True).start()
 
 
 def _on_modality(pages: Pages, modality: str, hvg: str, public: str):
@@ -782,7 +839,8 @@ def _init(request: gr.Request):
     """Fill every page from the kept pages, on the tab and the view the query asks.
 
     The pages are returned too, so a click on a pill shows its view without a
-    new fetch.
+    new fetch. New pages render their other views in the background, after the
+    view of this page load.
     """
     params = dict(request.query_params) if request else {}
     pages = _pages(_viewed_version(params))
@@ -791,7 +849,7 @@ def _init(request: gr.Request):
     modality, area, category = _initial_view(params, by_id, boards)
     hvg = HIDE if params.get("hvg") == HIDE else SHOW
     public = HIDE if params.get("public") == HIDE else SHOW
-    return (
+    page = (
         gr.Tabs(selected=tab),
         nav_html(tab, version),
         pages.hero,
@@ -807,6 +865,8 @@ def _init(request: gr.Request):
         pages.history,
         pages.cta,
     )
+    _warm_up(pages)
+    return page
 
 
 def build_demo() -> gr.Blocks:
@@ -842,7 +902,7 @@ def build_demo() -> gr.Blocks:
                             visible=False,
                             elem_classes=["pm-seg", "pm-seg--minor"],
                         )
-                    board_html = gr.HTML(padding=False)
+                    board_html = gr.HTML(padding=False, elem_id="pm-board")
                     history = gr.HTML(padding=False)
                     cta = gr.HTML(padding=False)
                 with gr.Tab("Tasks", id="tasks"):
@@ -960,19 +1020,26 @@ def build_demo() -> gr.Blocks:
         modality_in.change(_download_help, modality_in, download_md)
 
         pills = [modality_f, area_f, task_f, hvg_f, public_f]
-        modality_f.input(
+        modality_event = modality_f.input(
             _on_modality,
             [page_state, modality_f, hvg_f, public_f],
             [area_f, task_f, board_html],
             show_progress="hidden",
-        ).then(None, pills, None, js=VIEW_URL_JS)
-        for pill in pills[1:]:
-            pill.input(
-                _render_view,
-                [page_state, *pills],
-                board_html,
-                show_progress="hidden",
-            ).then(None, pills, None, js=VIEW_URL_JS)
+            queue=False,
+            trigger_mode="always_last",
+        )
+        pill_event = gr.on(
+            [pill.input for pill in pills[1:]],
+            _render_view,
+            [page_state, *pills],
+            board_html,
+            show_progress="hidden",
+            queue=False,
+            trigger_mode="always_last",
+        )
+        for event in (modality_event, pill_event):
+            event.then(None, [*pills, board_html], None, js=VIEW_URL_JS)
+            event.failure(None, js=CLEAR_LOADING_JS)
         demo.load(
             _init,
             None,
