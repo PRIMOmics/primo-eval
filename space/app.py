@@ -42,8 +42,9 @@ persisted results and their HTML. A page load asks the Hub only for the hash of
 the results file, and builds the pages again when it changed. Each view is
 rendered once per results file, for a page load or a click on a pill, with no
 reload and no new fetch. After the first page load of new pages, a background
-thread renders every view, so a click on a pill finds its view ready. Until the
-first page load ends, one loader stands in for the pages.
+thread renders every view, so a click on a pill finds its view ready. A click is
+one direct request, not a job in the queue, and of quick clicks only the last
+one runs. Until the first page load ends, one loader stands in for the pages.
 """
 
 import os
@@ -1013,14 +1014,18 @@ def build_demo() -> gr.Blocks:
             [page_state, modality_f, hvg_f, public_f],
             [area_f, task_f, board_html],
             show_progress="hidden",
+            queue=False,
+            trigger_mode="always_last",
         ).then(None, pills, None, js=VIEW_URL_JS)
-        for pill in pills[1:]:
-            pill.input(
-                _render_view,
-                [page_state, *pills],
-                board_html,
-                show_progress="hidden",
-            ).then(None, pills, None, js=VIEW_URL_JS)
+        gr.on(
+            [pill.input for pill in pills[1:]],
+            _render_view,
+            [page_state, *pills],
+            board_html,
+            show_progress="hidden",
+            queue=False,
+            trigger_mode="always_last",
+        ).then(None, pills, None, js=VIEW_URL_JS)
         demo.load(
             _init,
             None,

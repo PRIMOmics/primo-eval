@@ -654,6 +654,18 @@ def test_the_page_shows_one_loader_until_the_first_page_load_ends():
     )
 
 
+def test_a_pill_click_is_one_direct_request_and_the_last_click_wins():
+    _check_the_space_build(
+        "names = ('_on_modality', '_render_view'); "
+        "fns = [fn for fn in demo.fns.values() if fn.name in names]; "
+        "modes = sorted("
+        "(fn.name, fn.queue, fn.trigger_mode, len(fn.targets)) for fn in fns); "
+        "assert modes == ["
+        "('_on_modality', False, 'always_last', 1), "
+        "('_render_view', False, 'always_last', 4)], modes"
+    )
+
+
 def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
     monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))
