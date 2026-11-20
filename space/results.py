@@ -421,16 +421,16 @@ def read_results(token: str | None, revision: str | None = None) -> pd.DataFrame
     )
 
 
-def results_hash(token: str | None) -> str:
-    """The hash of the results file on the Hub, read with one request."""
+def results_hash(token: str | None) -> tuple[str, str]:
+    """The hash of the results file and the commit it was read at, in one request."""
     from huggingface_hub import get_hf_file_metadata, hf_hub_url
 
-    etag = get_hf_file_metadata(
+    metadata = get_hf_file_metadata(
         hf_hub_url(RESULTS_REPO, RESULTS_FILE, repo_type="dataset"), token=token
-    ).etag
-    if not etag:
+    )
+    if not metadata.etag or not metadata.commit_hash:
         raise EvaluatorError(f"the Hub gave no hash for {RESULTS_FILE}")
-    return etag
+    return metadata.etag, metadata.commit_hash
 
 
 def append_results(rows: list[dict], token: str | None) -> None:

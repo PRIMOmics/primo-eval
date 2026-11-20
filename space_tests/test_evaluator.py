@@ -2,13 +2,14 @@
 
 import io
 import pickle
+from types import SimpleNamespace
 
 import evaluator as ev
 import huggingface_hub
 import numpy as np
 import pandas as pd
 import pytest
-from huggingface_hub.utils import EntryNotFoundError
+from huggingface_hub.errors import LocalEntryNotFoundError, RemoteEntryNotFoundError
 from scoring import compute_auroc, compute_pearson
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import roc_auc_score
@@ -1704,18 +1705,27 @@ def test_public_task_ids_are_read_from_the_public_manifest(tmp_path):
     assert ev.public_task_ids_from_manifest(path) == {"t910", "t917"}
 
 
+def test_no_task_is_public_until_the_manifest_is_published(monkeypatch):
+    def absent(*args, **kwargs):
+        raise RemoteEntryNotFoundError(
+            ev.PUBLIC_TASKS_MANIFEST,
+            response=SimpleNamespace(status_code=404, headers={}, request=None),
+        )
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", absent)
+    assert ev.fetch_public_task_ids() == set()
+
+
 @pytest.mark.parametrize(
-    "error",
-    [EntryNotFoundError(ev.PUBLIC_TASKS_MANIFEST), ConnectionError("Hub down")],
+    "error", [LocalEntryNotFoundError("Hub unreachable"), ConnectionError("Hub down")]
 )
-def test_no_task_is_public_when_the_manifest_is_missing_or_unreachable(
-    monkeypatch, error
-):
+def test_an_unreachable_public_manifest_raises(monkeypatch, error):
     def fail(*args, **kwargs):
         raise error
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fail)
-    assert ev.fetch_public_task_ids() == set()
+    with pytest.raises(type(error)):
+        ev.fetch_public_task_ids()
 
 
 def _record_revisions(monkeypatch) -> list[tuple[str, str]]:
@@ -1738,7 +1748,8 @@ def test_the_fetchers_read_the_commits_of_the_current_version(monkeypatch):
     for fetch in (ev.fetch_task_labels, ev.fetch_task_targets):
         with pytest.raises(LookupError):
             fetch("t901")
-    ev.fetch_public_task_ids()
+    with pytest.raises(LookupError):
+        ev.fetch_public_task_ids()
 
     assert calls == [
         (ev.PUBLIC_REPO, CURRENT.data),

@@ -247,7 +247,9 @@ def test_scored_rows_are_tagged_with_the_current_version():
     assert [row[VERSION] for row in rows] == [CURRENT.number]
 
 
-def test_the_results_hash_is_the_etag_of_the_results_file(monkeypatch):
+def test_the_results_hash_is_the_etag_and_the_commit_of_the_results_file(
+    monkeypatch,
+):
     asked = []
 
     def metadata(url, token):
@@ -256,7 +258,7 @@ def test_the_results_hash_is_the_etag_of_the_results_file(monkeypatch):
 
     monkeypatch.setattr(huggingface_hub, "get_hf_file_metadata", metadata)
 
-    assert results_hash("secret") == "abc123"
+    assert results_hash("secret") == ("abc123", "c" * 40)
     [(url, token)] = asked
     assert url.endswith(
         f"/datasets/PRIMOmics/primo-results/resolve/main/{RESULTS_FILE}"
@@ -264,11 +266,12 @@ def test_the_results_hash_is_the_etag_of_the_results_file(monkeypatch):
     assert token == "secret"
 
 
-def test_a_results_file_without_a_hash_is_our_error(monkeypatch):
+@pytest.mark.parametrize("etag, commit", [(None, "c" * 40), ("abc123", None)])
+def test_a_results_file_without_a_hash_is_our_error(monkeypatch, etag, commit):
     monkeypatch.setattr(
         huggingface_hub,
         "get_hf_file_metadata",
-        lambda url, token: SimpleNamespace(etag=None, commit_hash=None),
+        lambda url, token: SimpleNamespace(etag=etag, commit_hash=commit),
     )
 
     with pytest.raises(EvaluatorError):

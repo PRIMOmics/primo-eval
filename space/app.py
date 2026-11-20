@@ -366,15 +366,16 @@ def _registry_by_id(version: Version) -> dict[str, dict]:
 PageState = tuple[dict[str, dict], list[Board], pd.DataFrame, Version]
 
 
-def _page_state(version: Version = CURRENT) -> PageState:
+def _page_state(version: Version = CURRENT, revision: str | None = None) -> PageState:
     """Registry, boards and results of ``version``, fetched from the Hub.
 
-    A failed fetch yields empty structures so the page renders a "come back
-    later" state instead of a stack trace.
+    The results are read at ``revision``, or at the latest commit. A failed fetch
+    yields empty structures so the page renders a "come back later" state
+    instead of a stack trace.
     """
     try:
         by_id = _registry_by_id(version)
-        rows = version_rows(read_results(TOKEN), version.number)
+        rows = version_rows(read_results(TOKEN, revision), version.number)
         return by_id, build_boards(by_id), rows, version
     except Exception:  # noqa: BLE001
         traceback.print_exc()
@@ -427,19 +428,21 @@ def _built_pages(state: PageState, scores: str) -> Pages:
 def _pages(version: Version) -> Pages:
     """The pages of ``version``, built again only when the results file changed.
 
-    If the Hub gives no hash, or the new pages have no registry, the pages built
-    last are shown. Pages without a registry are never kept, so the next visit
-    fetches again.
+    The results are read at the commit of their hash, so a failed download
+    cannot return an older copy. A failed fetch leaves the new pages without a
+    registry, and such pages are never kept: the next visit fetches again. If
+    the Hub gives no hash, or the new pages have no registry, the pages built
+    last are shown.
     """
     kept = PAGES_BY_VERSION.get(version.number)
     try:
-        scores = results_hash(TOKEN)
+        scores, commit = results_hash(TOKEN)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         return kept or _built_pages(_page_state(version), "")
     if kept is not None and kept.scores == scores:
         return kept
-    pages = _built_pages(_page_state(version), scores)
+    pages = _built_pages(_page_state(version, commit), scores)
     if not pages.state[0]:
         return kept or pages
     PAGES_BY_VERSION[version.number] = pages

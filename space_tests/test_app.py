@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
+import pytest
 from boards import ALL, build_boards
 from versions import CURRENT
 
@@ -218,9 +219,11 @@ def test_registry_flags_the_public_tasks(monkeypatch):
 def _init(monkeypatch, registry, boards, **query):
     empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
     monkeypatch.setattr(
-        app, "_page_state", lambda version: (registry, boards, empty, version)
+        app,
+        "_page_state",
+        lambda version, revision=None: (registry, boards, empty, version),
     )
-    monkeypatch.setattr(app, "results_hash", lambda token: "hash-1")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("hash-1", "commit-1"))
     monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
     return app._init(SimpleNamespace(query_params=query))
@@ -270,7 +273,7 @@ def _counted_builds(monkeypatch, registry: dict) -> list:
     builds = []
     empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
 
-    def page_state(version):
+    def page_state(version, revision=None):
         builds.append(version)
         return registry, build_boards(registry), empty, version
 
@@ -279,13 +282,13 @@ def _counted_builds(monkeypatch, registry: dict) -> list:
     return builds
 
 
-def _no_hash(token):
+def _unreachable(*args):
     raise ConnectionError("Hub unavailable")
 
 
 def test_the_pages_are_built_again_only_when_the_results_file_changes(monkeypatch):
     builds = _counted_builds(monkeypatch, dict(REGISTRY))
-    hashes = iter(["a", "a", "b"])
+    hashes = iter([("a", "commit-a"), ("a", "commit-a"), ("b", "commit-b")])
     monkeypatch.setattr(app, "results_hash", lambda token: next(hashes))
 
     first, second, third = [app._pages(CURRENT) for _ in range(3)]
@@ -297,7 +300,7 @@ def test_the_pages_are_built_again_only_when_the_results_file_changes(monkeypatc
 
 def test_each_version_keeps_its_own_pages(monkeypatch):
     builds = _counted_builds(monkeypatch, dict(REGISTRY))
-    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
 
     current, closed = app._pages(CURRENT), app._pages(CLOSED)
 
@@ -309,7 +312,7 @@ def test_each_version_keeps_its_own_pages(monkeypatch):
 
 def test_pages_without_a_registry_are_not_kept(monkeypatch):
     builds = _counted_builds(monkeypatch, {})
-    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
 
     app._pages(CURRENT)
     app._pages(CURRENT)
@@ -319,9 +322,9 @@ def test_pages_without_a_registry_are_not_kept(monkeypatch):
 
 def test_the_last_pages_show_when_the_hub_gives_no_hash(monkeypatch):
     builds = _counted_builds(monkeypatch, dict(REGISTRY))
-    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
     kept = app._pages(CURRENT)
-    monkeypatch.setattr(app, "results_hash", _no_hash)
+    monkeypatch.setattr(app, "results_hash", _unreachable)
 
     assert app._pages(CURRENT) is kept
     assert len(builds) == 1
@@ -329,11 +332,11 @@ def test_the_last_pages_show_when_the_hub_gives_no_hash(monkeypatch):
 
 def test_the_last_pages_show_when_a_new_build_fails(monkeypatch):
     _counted_builds(monkeypatch, dict(REGISTRY))
-    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
     kept = app._pages(CURRENT)
     builds = _counted_builds(monkeypatch, {})
     app.PAGES_BY_VERSION[CURRENT.number] = kept
-    monkeypatch.setattr(app, "results_hash", lambda token: "b")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("b", "commit-b"))
 
     assert app._pages(CURRENT) is kept
     assert app._pages(CURRENT) is kept
@@ -342,7 +345,7 @@ def test_the_last_pages_show_when_a_new_build_fails(monkeypatch):
 
 def test_pages_built_without_a_hash_are_not_kept(monkeypatch):
     builds = _counted_builds(monkeypatch, dict(REGISTRY))
-    monkeypatch.setattr(app, "results_hash", _no_hash)
+    monkeypatch.setattr(app, "results_hash", _unreachable)
 
     app._pages(CURRENT)
     app._pages(CURRENT)
@@ -351,9 +354,50 @@ def test_pages_built_without_a_hash_are_not_kept(monkeypatch):
     assert app.PAGES_BY_VERSION == {}
 
 
+def _fake_hub(monkeypatch) -> None:
+    """Serve the test registry and no results from the Hub, at hash ``a``."""
+    monkeypatch.delenv("PRIMO_FIXTURE", raising=False)
+    tasks = list(REGISTRY.values())
+    datasets = [{"id": task["dataset_id"]} for task in tasks]
+    monkeypatch.setattr(app, "fetch_manifest", lambda token, revision: datasets)
+    monkeypatch.setattr(app, "fetch_tasks_registry", lambda token, revision: tasks)
+    monkeypatch.setattr(app, "fetch_public_task_ids", lambda token, revision: set())
+    monkeypatch.setattr(
+        app,
+        "read_results",
+        lambda token, revision: pd.DataFrame(columns=app.RESULT_COLUMNS),
+    )
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
+
+
+def test_the_results_are_read_at_the_commit_of_their_hash(monkeypatch):
+    _fake_hub(monkeypatch)
+    revisions = []
+    empty = pd.DataFrame(columns=app.RESULT_COLUMNS)
+    monkeypatch.setattr(
+        app, "read_results", lambda token, revision: revisions.append(revision) or empty
+    )
+
+    app._pages(CURRENT)
+
+    assert revisions == ["commit-a"]
+
+
+@pytest.mark.parametrize("fetch", ["read_results", "fetch_public_task_ids"])
+def test_pages_built_from_a_failed_fetch_are_not_kept(monkeypatch, fetch):
+    _fake_hub(monkeypatch)
+    kept = app._pages(CURRENT)
+    monkeypatch.setattr(app, fetch, _unreachable)
+    monkeypatch.setattr(app, "results_hash", lambda token: ("b", "commit-b"))
+
+    assert app._pages(CURRENT) is kept
+    assert app.PAGES_BY_VERSION == {CURRENT.number: kept}
+
+
 def test_a_view_is_rendered_once_per_results_file(monkeypatch):
     _counted_builds(monkeypatch, dict(REGISTRY))
-    monkeypatch.setattr(app, "results_hash", lambda token: "a")
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
     rendered = []
     monkeypatch.setattr(
         app, "render_view", lambda *args: rendered.append(args) or "view"
@@ -496,7 +540,7 @@ def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
     monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))
     ledger["version"] = ["", CURRENT.number]
-    monkeypatch.setattr(app, "read_results", lambda token: ledger)
+    monkeypatch.setattr(app, "read_results", lambda token, revision: ledger)
 
     _, _, rows, version = app._page_state()
 
@@ -533,7 +577,7 @@ def test_a_closed_version_reads_its_commits_and_its_rows(monkeypatch):
     monkeypatch.setattr(app, "fetch_public_task_ids", fetch(set()))
     ledger = _ledger(("old", "alice", "t901"), ("new", "bob", "t901"))
     ledger["version"] = [CLOSED.number, CURRENT.number]
-    monkeypatch.setattr(app, "read_results", lambda token: ledger)
+    monkeypatch.setattr(app, "read_results", lambda token, revision: ledger)
 
     by_id, _, rows, version = app._page_state(CLOSED)
 
