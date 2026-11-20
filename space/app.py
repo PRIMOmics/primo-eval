@@ -165,6 +165,7 @@ THEME = gr.themes.Base(
 
 VIEW_URL_JS = """
 (modality, area, task, hvg, pub) => {
+  document.documentElement.classList.remove("pm-loading");
   const url = new URL(window.location.href);
   const values = { modality, area, task, hvg, public: pub };
   const defaults = {
@@ -287,6 +288,10 @@ TABLE_SORT_JS = """
     });
     const wrap = table.parentElement;
     wrap.scrollLeft = query ? wrap.scrollWidth : 0;
+  });
+  document.addEventListener("input", (event) => {
+    if (!event.target.closest("#pm-controls")) return;
+    document.documentElement.classList.add("pm-loading");
   });
 
   const showTab = (tab) => {
@@ -891,7 +896,7 @@ def build_demo() -> gr.Blocks:
                             visible=False,
                             elem_classes=["pm-seg", "pm-seg--minor"],
                         )
-                    board_html = gr.HTML(padding=False)
+                    board_html = gr.HTML(padding=False, elem_id="pm-board")
                     history = gr.HTML(padding=False)
                     cta = gr.HTML(padding=False)
                 with gr.Tab("Tasks", id="tasks"):

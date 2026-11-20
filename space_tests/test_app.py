@@ -666,6 +666,19 @@ def test_a_pill_click_is_one_direct_request_and_the_last_click_wins():
     )
 
 
+def test_a_pill_click_fades_the_board_until_its_view_arrives():
+    css = Path(app.CSS_PATH).read_text()
+
+    assert 'event.target.closest("#pm-controls")' in app.TABLE_SORT_JS
+    assert 'classList.add("pm-loading")' in app.TABLE_SORT_JS
+    assert 'classList.remove("pm-loading")' in app.VIEW_URL_JS
+    assert "html.pm-loading #pm-board { opacity: .5;" in css
+    _check_the_space_build(
+        "blocks = demo.blocks.values(); "
+        "assert any(getattr(b, 'elem_id', None) == 'pm-board' for b in blocks)"
+    )
+
+
 def test_a_page_shows_only_the_rows_of_the_current_version(monkeypatch):
     monkeypatch.setattr(app, "_registry_by_id", lambda version: dict(REGISTRY))
     ledger = _ledger(("legacy", "alice", "t901"), ("current", "bob", "t901"))
