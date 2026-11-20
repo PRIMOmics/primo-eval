@@ -41,11 +41,13 @@ The Space keeps the pages it builds in memory: the registry, the boards, the
 persisted results and their HTML. A page load asks the Hub only for the hash of
 the results file, and builds the pages again when it changed. Each view is
 rendered once per results file, for a page load or a click on a pill, with no
-reload and no new fetch. Until the first page load ends, one loader stands in
-for the pages.
+reload and no new fetch. After the first page load of new pages, a background
+thread renders every view, so a click on a pill finds its view ready. Until the
+first page load ends, one loader stands in for the pages.
 """
 
 import os
+import threading
 import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -152,7 +154,8 @@ DEFAULT_MODALITY = "bulk-rna"
 SHOW = "show"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
-VIEW_CACHE_SIZE = 128
+DEFAULT_VIEW = (DEFAULT_MODALITY, ALL, ALL, SHOW, SHOW)
+VIEW_CACHE_SIZE = 512
 
 THEME = gr.themes.Base(
     font=[gr.themes.LocalFont("IBM Plex Sans", weights=(400, 700)), "sans-serif"],
@@ -364,6 +367,7 @@ def _registry_by_id(version: Version) -> dict[str, dict]:
 
 
 PageState = tuple[dict[str, dict], list[Board], pd.DataFrame, Version]
+View = tuple[str, str, str, str, str]
 
 
 def _page_state(version: Version = CURRENT, revision: str | None = None) -> PageState:
@@ -406,6 +410,7 @@ class Pages:
     about: str
     history: str
     cta: str
+    warm_up_started: bool = False
 
 
 PAGES_BY_VERSION: dict[str, Pages] = {}
@@ -760,6 +765,46 @@ def _render_view(
     return _view_html(pages, modality, area, category, hvg, public)
 
 
+def _views_of(by_id: dict[str, dict]) -> list[View]:
+    """Every combination of the pills, the fewest clicks from the default first."""
+    views = [
+        (modality, area, category, hvg, public)
+        for _, modality in modality_choices(by_id)
+        for _, area in area_choices(by_id, modality)
+        for _, category in category_choices(by_id, modality)
+        for hvg in (SHOW, HIDE)
+        for public in (SHOW, HIDE)
+    ]
+    return sorted(
+        views,
+        key=lambda view: sum(pill != usual for pill, usual in zip(view, DEFAULT_VIEW)),
+    )
+
+
+def _is_kept(pages: Pages) -> bool:
+    """Are ``pages`` the ones kept for their board version?"""
+    return PAGES_BY_VERSION.get(pages.state[3].number) is pages
+
+
+def _render_every_view(pages: Pages) -> None:
+    """Render every view of ``pages`` into the cache, while they stay kept."""
+    for view in _views_of(pages.state[0]):
+        if not _is_kept(pages):
+            return
+        try:
+            _view_html(pages, *view)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+
+
+def _warm_up(pages: Pages) -> None:
+    """Render every view of newly kept ``pages`` in a background thread, once."""
+    if pages.warm_up_started or not _is_kept(pages):
+        return
+    pages.warm_up_started = True
+    threading.Thread(target=_render_every_view, args=(pages,), daemon=True).start()
+
+
 def _on_modality(pages: Pages, modality: str, hvg: str, public: str):
     """A new modality brings its own area and task pills, both back on All."""
     by_id = pages.state[0]
@@ -782,7 +827,8 @@ def _init(request: gr.Request):
     """Fill every page from the kept pages, on the tab and the view the query asks.
 
     The pages are returned too, so a click on a pill shows its view without a
-    new fetch.
+    new fetch. New pages render their other views in the background, after the
+    view of this page load.
     """
     params = dict(request.query_params) if request else {}
     pages = _pages(_viewed_version(params))
@@ -791,7 +837,7 @@ def _init(request: gr.Request):
     modality, area, category = _initial_view(params, by_id, boards)
     hvg = HIDE if params.get("hvg") == HIDE else SHOW
     public = HIDE if params.get("public") == HIDE else SHOW
-    return (
+    page = (
         gr.Tabs(selected=tab),
         nav_html(tab, version),
         pages.hero,
@@ -807,6 +853,8 @@ def _init(request: gr.Request):
         pages.history,
         pages.cta,
     )
+    _warm_up(pages)
+    return page
 
 
 def build_demo() -> gr.Blocks:

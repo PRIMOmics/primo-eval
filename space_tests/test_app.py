@@ -225,6 +225,7 @@ def _init(monkeypatch, registry, boards, **query):
     )
     monkeypatch.setattr(app, "results_hash", lambda token: ("hash-1", "commit-1"))
     monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
+    monkeypatch.setattr(app, "_render_every_view", lambda pages: None)
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
     return app._init(SimpleNamespace(query_params=query))
 
@@ -415,6 +416,123 @@ def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards)
 
     assert isinstance(state, app.Pages)
     assert state.state[0] is registry
+
+
+class _InlineThread:
+    """A thread that runs its target as soon as it starts."""
+
+    def __init__(self, target, args, daemon):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)
+
+
+def _warm_ups(monkeypatch) -> list:
+    """Run each warm-up at once, and record the pages it renders."""
+    started = []
+    monkeypatch.setattr(app, "threading", SimpleNamespace(Thread=_InlineThread))
+    monkeypatch.setattr(app, "_render_every_view", started.append)
+    monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
+    return started
+
+
+def _page_load() -> "app.Pages":
+    """The pages that one page load gives to the pills."""
+    return app._init(SimpleNamespace(query_params={}))[9]
+
+
+def _counted_renders(monkeypatch) -> list:
+    """Record each view rendered from scratch."""
+    rendered = []
+    monkeypatch.setattr(
+        app, "render_view", lambda *args: rendered.append(args) or "view"
+    )
+    return rendered
+
+
+def test_new_pages_render_every_view_after_their_first_page_load(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    hashes = iter([("a", "commit-a"), ("a", "commit-a"), ("b", "commit-b")])
+    monkeypatch.setattr(app, "results_hash", lambda token: next(hashes))
+    started = _warm_ups(monkeypatch)
+
+    first, second, third = [_page_load() for _ in range(3)]
+
+    assert second is first
+    assert started == [first, third]
+
+
+def test_pages_that_are_not_kept_render_no_other_view(monkeypatch):
+    _counted_builds(monkeypatch, {})
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    started = _warm_ups(monkeypatch)
+
+    _page_load()
+
+    assert started == []
+
+
+def test_the_warm_up_renders_every_view_once(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    rendered = _counted_renders(monkeypatch)
+    pages = app._pages(CURRENT)
+    views = app._views_of(pages.state[0])
+
+    app._render_every_view(pages)
+    for view in views:
+        assert app._render_view(pages, *view) == "view"
+
+    assert len(set(views)) == len(views) == 4 * 4 * 2 * 2
+    assert len(rendered) == len(views)
+
+
+def test_the_views_nearest_the_default_view_render_first():
+    default = ("bulk-rna", ALL, ALL, "show", "show")
+    views = app._views_of(dict(REGISTRY))
+    clicks = [
+        sum(pill != usual for pill, usual in zip(view, default)) for view in views
+    ]
+
+    assert views[0] == default
+    assert clicks == sorted(clicks)
+
+
+def test_the_warm_up_stops_once_newer_pages_are_kept(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    pages = app._pages(CURRENT)
+    newer = app._built_pages(pages.state, "b")
+    rendered = []
+
+    def render_view(*args):
+        rendered.append(args)
+        app.PAGES_BY_VERSION[CURRENT.number] = newer
+        return "view"
+
+    monkeypatch.setattr(app, "render_view", render_view)
+    app._render_every_view(pages)
+
+    assert len(rendered) == 1
+
+
+def test_a_view_that_fails_does_not_stop_the_warm_up(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    pages = app._pages(CURRENT)
+    rendered = []
+
+    def render_view(*args):
+        rendered.append(args)
+        if len(rendered) == 1:
+            raise RuntimeError("one view fails")
+        return "view"
+
+    monkeypatch.setattr(app, "render_view", render_view)
+    app._render_every_view(pages)
+
+    assert len(rendered) == len(app._views_of(pages.state[0]))
 
 
 def test_the_public_tasks_pill_shows_only_when_a_task_is_public(
