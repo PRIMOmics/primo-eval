@@ -9,7 +9,11 @@ import numpy as np
 import pandas as pd
 import pytest
 from evaluator import EvaluatorError
-from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
+from huggingface_hub.errors import (
+    HfHubHTTPError,
+    LocalEntryNotFoundError,
+    RemoteEntryNotFoundError,
+)
 from results import (
     INSTITUTION,
     IS_AUTHOR_SUBMISSION,
@@ -317,7 +321,7 @@ class FakeResultsRepo:
         revision = revision or self.head
         files = self.commits[int(revision, 16)]
         if filename not in files:
-            raise EntryNotFoundError(filename)
+            raise RemoteEntryNotFoundError(filename, response=_response(404))
         path = self.folder / f"{revision}-{filename}"
         path.write_bytes(files[filename])
         return str(path)
@@ -398,3 +402,22 @@ def test_an_append_stops_at_once_on_another_hub_error(results_repo, monkeypatch)
         APPENDS[SUBMISSIONS_FILE]("mine")
 
     assert results_repo.uploads == 1
+
+
+@pytest.mark.parametrize("filename", [RESULTS_FILE, SUBMISSIONS_FILE])
+def test_an_append_stops_when_the_hub_cannot_be_read(
+    results_repo, monkeypatch, filename
+):
+    """The Hub fails while the cache has no copy of the file at this commit."""
+    results_repo.commits = [{filename: b"model_name\nolder\n"}]
+
+    def unreachable(*args, **kwargs):
+        raise LocalEntryNotFoundError("Hub unreachable")
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", unreachable)
+
+    with pytest.raises(LocalEntryNotFoundError):
+        APPENDS[filename]("mine")
+
+    assert results_repo.uploads == 0
+    assert list(results_repo.table(filename)["model_name"]) == ["older"]
