@@ -185,6 +185,10 @@ VIEW_URL_JS = """
 RELOAD_AFTER_EVALUATION_JS = "() => { window.pmReload = true; }"
 PAGE_READY_JS = '() => document.documentElement.classList.add("pm-ready")'
 CLEAR_LOADING_JS = '() => document.documentElement.classList.remove("pm-loading")'
+RELOAD_NOTE = (
+    '<div class="pm-card"><p class="pm-empty">This page is out of date. '
+    "Please reload it.</p></div>"
+)
 
 SUBMIT_HEAD = (
     '<div class="pm-head"><div><h1>Submit a model</h1>'
@@ -750,6 +754,13 @@ def _view_name(by_id: dict[str, dict], modality: str, area: str, category: str) 
     )
 
 
+def _marker(modality: str, area: str, category: str, hvg: str, public: str) -> str:
+    """A hidden marker of the pills a board answers."""
+    return (
+        f'<span hidden data-view="{modality}|{area}|{category}|{hvg}|{public}"></span>'
+    )
+
+
 @lru_cache(maxsize=VIEW_CACHE_SIZE)
 def _view_html(
     pages: Pages, modality: str, area: str, category: str, hvg: str, public: str
@@ -760,9 +771,8 @@ def _view_html(
     if public == HIDE:
         board = without_public(board, by_id)
     name = _view_name(by_id, modality, area, category)
-    view = f"{modality}|{area}|{category}|{hvg}|{public}"
     tables = render_view(board, df, by_id, name, hvg != HIDE)
-    return f'<span hidden data-view="{view}"></span>{tables}'
+    return _marker(modality, area, category, hvg, public) + tables
 
 
 def _render_view(
@@ -770,10 +780,12 @@ def _render_view(
 ) -> str:
     """The tables of the view the pills select, on the version on screen.
 
-    A pill clicked before the page has loaded has no pages yet, and changes nothing.
+    Gradio drops the pages of a session whose heartbeat stopped (a laptop asleep, a
+    new network) once they are an hour old. A click then shows a note that asks for
+    a reload, after the marker of the pills, so the fade ends.
     """
     if pages is None:
-        return gr.skip()
+        return _marker(modality, area, category, hvg, public) + RELOAD_NOTE
     return _view_html(pages, modality, area, category, hvg, public)
 
 
@@ -817,13 +829,16 @@ def _warm_up(pages: Pages) -> None:
     threading.Thread(target=_render_every_view, args=(pages,), daemon=True).start()
 
 
-def _on_modality(pages: Pages, modality: str, hvg: str, public: str):
+def _on_modality(pages: Pages | None, modality: str, hvg: str, public: str):
     """A new modality brings its own area and task pills, both back on All."""
+    board = _render_view(pages, modality, ALL, ALL, hvg, public)
+    if pages is None:
+        return gr.Radio(value=ALL), gr.Radio(value=ALL), board
     by_id = pages.state[0]
     return (
         gr.Radio(choices=area_choices(by_id, modality), value=ALL),
         gr.Radio(choices=category_choices(by_id, modality), value=ALL),
-        _render_view(pages, modality, ALL, ALL, hvg, public),
+        board,
     )
 
 

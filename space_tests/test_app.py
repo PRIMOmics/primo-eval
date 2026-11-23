@@ -25,7 +25,6 @@ gradio_stub.Request = object
 gradio_stub.Blocks = object
 gradio_stub.Tabs = lambda selected: selected
 gradio_stub.Radio = lambda **kwargs: kwargs
-gradio_stub.skip = lambda: "skip"
 sys.modules["gradio"] = gradio_stub
 app = importlib.import_module("app")
 if previous_gradio is None:
@@ -265,8 +264,21 @@ def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
     assert [pill["value"] for pill in pills] == ["bulk-rna", ALL, ALL]
 
 
-def test_a_pill_clicked_before_the_page_loads_changes_nothing():
-    assert app._render_view(None, "bulk-rna", ALL, ALL, "show", "show") == "skip"
+def test_a_session_without_pages_asks_for_a_reload():
+    board = app._render_view(None, "bulk-rna", "dermatology", ALL, "hide", "show")
+    area, task, modality_board = app._on_modality(
+        None, "single-cell-rna", "show", "hide"
+    )
+
+    assert board == (
+        '<span hidden data-view="bulk-rna|dermatology|all|hide|show"></span>'
+        + app.RELOAD_NOTE
+    )
+    assert area == task == {"value": ALL}
+    assert modality_board == (
+        '<span hidden data-view="single-cell-rna|all|all|show|hide"></span>'
+        + app.RELOAD_NOTE
+    )
 
 
 def _counted_builds(monkeypatch, registry: dict) -> list:
