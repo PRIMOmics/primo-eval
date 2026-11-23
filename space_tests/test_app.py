@@ -487,6 +487,23 @@ def test_new_pages_render_every_view_after_their_first_page_load(monkeypatch):
     assert started == [first, third]
 
 
+def test_the_warm_up_starts_after_the_view_of_the_page_load(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    _warm_ups(monkeypatch)
+    steps = []
+    monkeypatch.setattr(
+        app, "render_view", lambda *args: steps.append("view") or "view"
+    )
+    monkeypatch.setattr(
+        app, "_render_every_view", lambda pages: steps.append("warm-up")
+    )
+
+    _page_load()
+
+    assert steps == ["view", "warm-up"]
+
+
 def test_pages_that_are_not_kept_render_no_other_view(monkeypatch):
     _counted_builds(monkeypatch, {})
     monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
