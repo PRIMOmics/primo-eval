@@ -43,8 +43,9 @@ the results file, and builds the pages again when it changed. Each view is
 rendered once per results file, for a page load or a click on a pill, with no
 reload and no new fetch. After the first page load of new pages, a background
 thread renders every view, so a click on a pill finds its view ready. A click is
-one direct request, not a job in the queue, and of quick clicks only the last
-one runs. Until the first page load ends, one loader stands in for the pages.
+one direct request, not a job in the queue. The pills share one event: a click
+made while another one runs waits, and only the last waiting click runs. Until
+the first page load ends, one loader stands in for the pages.
 """
 
 import os
@@ -775,20 +776,6 @@ def _view_html(
     return _marker(modality, area, category, hvg, public) + tables
 
 
-def _render_view(
-    pages: Pages | None, modality: str, area: str, category: str, hvg: str, public: str
-) -> str:
-    """The tables of the view the pills select, on the version on screen.
-
-    Gradio drops the pages of a session whose heartbeat stopped (a laptop asleep, a
-    new network) once they are an hour old. A click then shows a note that asks for
-    a reload, after the marker of the pills, so the fade ends.
-    """
-    if pages is None:
-        return _marker(modality, area, category, hvg, public) + RELOAD_NOTE
-    return _view_html(pages, modality, area, category, hvg, public)
-
-
 def _views_of(by_id: dict[str, dict]) -> list[View]:
     """Every combination of the pills, the fewest clicks from the default first."""
     views = [
@@ -829,17 +816,34 @@ def _warm_up(pages: Pages) -> None:
     threading.Thread(target=_render_every_view, args=(pages,), daemon=True).start()
 
 
-def _on_modality(pages: Pages | None, modality: str, hvg: str, public: str):
-    """A new modality brings its own area and task pills, both back on All."""
-    board = _render_view(pages, modality, ALL, ALL, hvg, public)
+def _on_pill(
+    pages: Pages | None,
+    shown: str | None,
+    modality: str,
+    area: str,
+    category: str,
+    hvg: str,
+    public: str,
+):
+    """The view of the pills; a new modality brings its own area and task pills.
+
+    ``shown`` is the modality on screen. When the modality pill differs from it,
+    the area and task pills get the choices of the new modality, both on All.
+    Gradio drops the pages of a session whose heartbeat stopped (a laptop asleep, a
+    new network) once they are an hour old. A click then shows a note that asks for
+    a reload, after the marker of the pills, so the fade ends.
+    """
     if pages is None:
-        return gr.Radio(value=ALL), gr.Radio(value=ALL), board
-    by_id = pages.state[0]
-    return (
-        gr.Radio(choices=area_choices(by_id, modality), value=ALL),
-        gr.Radio(choices=category_choices(by_id, modality), value=ALL),
-        board,
-    )
+        board = _marker(modality, area, category, hvg, public) + RELOAD_NOTE
+        return gr.skip(), gr.skip(), board, gr.skip()
+    areas, tasks = gr.skip(), gr.skip()
+    if modality != shown:
+        by_id = pages.state[0]
+        areas = gr.Radio(choices=area_choices(by_id, modality), value=ALL)
+        tasks = gr.Radio(choices=category_choices(by_id, modality), value=ALL)
+        area, category = ALL, ALL
+    board = _view_html(pages, modality, area, category, hvg, public)
+    return areas, tasks, board, modality
 
 
 def _viewed_version(params: dict) -> Version:
@@ -854,8 +858,8 @@ def _init(request: gr.Request):
     """Fill every page from the kept pages, on the tab and the view the query asks.
 
     The pages are returned too, so a click on a pill shows its view without a
-    new fetch. New pages render their other views in the background, after the
-    view of this page load.
+    new fetch, and so is the modality on screen. New pages render their other
+    views in the background, after the view of this page load.
     """
     params = dict(request.query_params) if request else {}
     pages = _pages(_viewed_version(params))
@@ -868,7 +872,7 @@ def _init(request: gr.Request):
         gr.Tabs(selected=tab),
         nav_html(tab, version),
         pages.hero,
-        _render_view(pages, modality, area, category, hvg, public),
+        _view_html(pages, modality, area, category, hvg, public),
         gr.Radio(choices=modality_choices(by_id), value=modality),
         gr.Radio(choices=area_choices(by_id, modality), value=area),
         gr.Radio(choices=category_choices(by_id, modality), value=category),
@@ -879,6 +883,7 @@ def _init(request: gr.Request):
         pages.about,
         pages.history,
         pages.cta,
+        modality,
     )
     _warm_up(pages)
     return page
@@ -887,6 +892,7 @@ def _init(request: gr.Request):
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="PRIMO Benchmark", fill_width=True) as demo:
         page_state = gr.State(None)
+        shown_modality = gr.State(None)
         gr.HTML(page_loader(), padding=False, elem_id="pm-loader")
         with gr.Column(elem_id="pm-site"):
             nav = gr.HTML(padding=False)
@@ -1035,26 +1041,17 @@ def build_demo() -> gr.Blocks:
         modality_in.change(_download_help, modality_in, download_md)
 
         pills = [modality_f, area_f, task_f, hvg_f, public_f]
-        modality_event = modality_f.input(
-            _on_modality,
-            [page_state, modality_f, hvg_f, public_f],
-            [area_f, task_f, board_html],
-            show_progress="hidden",
-            queue=False,
-            trigger_mode="always_last",
-        )
         pill_event = gr.on(
-            [pill.input for pill in pills[1:]],
-            _render_view,
-            [page_state, *pills],
-            board_html,
+            [pill.input for pill in pills],
+            _on_pill,
+            [page_state, shown_modality, *pills],
+            [area_f, task_f, board_html, shown_modality],
             show_progress="hidden",
             queue=False,
             trigger_mode="always_last",
         )
-        for event in (modality_event, pill_event):
-            event.then(None, [*pills, board_html], None, js=VIEW_URL_JS)
-            event.failure(None, js=CLEAR_LOADING_JS)
+        pill_event.then(None, [*pills, board_html], None, js=VIEW_URL_JS)
+        pill_event.failure(None, js=CLEAR_LOADING_JS)
         demo.load(
             _init,
             None,
@@ -1069,6 +1066,7 @@ def build_demo() -> gr.Blocks:
                 about_md,
                 history,
                 cta,
+                shown_modality,
             ],
             show_progress="hidden",
         ).then(None, js=PAGE_READY_JS)
