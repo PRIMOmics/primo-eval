@@ -25,6 +25,7 @@ gradio_stub.Request = object
 gradio_stub.Blocks = object
 gradio_stub.Tabs = lambda selected: selected
 gradio_stub.Radio = lambda **kwargs: kwargs
+gradio_stub.skip = lambda: "skip"
 sys.modules["gradio"] = gradio_stub
 app = importlib.import_module("app")
 if previous_gradio is None:
@@ -265,19 +266,14 @@ def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
 
 
 def test_a_session_without_pages_asks_for_a_reload():
-    board = app._render_view(None, "bulk-rna", "dermatology", ALL, "hide", "show")
-    area, task, modality_board = app._on_modality(
-        None, "single-cell-rna", "show", "hide"
-    )
+    click = app._on_pill(None, None, "bulk-rna", "dermatology", ALL, "hide", "show")
 
-    assert board == (
+    assert click == (
+        "skip",
+        "skip",
         '<span hidden data-view="bulk-rna|dermatology|all|hide|show"></span>'
-        + app.RELOAD_NOTE
-    )
-    assert area == task == {"value": ALL}
-    assert modality_board == (
-        '<span hidden data-view="single-cell-rna|all|all|show|hide"></span>'
-        + app.RELOAD_NOTE
+        + app.RELOAD_NOTE,
+        "skip",
     )
 
 
@@ -418,7 +414,7 @@ def test_a_view_is_rendered_once_per_results_file(monkeypatch):
     pages = app._pages(CURRENT)
 
     for hvg in ("show", "show", "hide"):
-        html = app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show")
+        html = app._view_html(pages, "bulk-rna", ALL, ALL, hvg, "show")
         assert html.endswith("view")
 
     assert len(rendered) == 2
@@ -430,9 +426,48 @@ def test_a_view_starts_with_a_marker_of_its_pills(monkeypatch):
     monkeypatch.setattr(app, "render_view", lambda *args: "view")
     pages = app._pages(CURRENT)
 
-    html = app._render_view(pages, "bulk-rna", ALL, ALL, "hide", "show")
+    html = app._view_html(pages, "bulk-rna", ALL, ALL, "hide", "show")
 
     assert html == '<span hidden data-view="bulk-rna|all|all|hide|show"></span>view'
+
+
+def test_a_new_modality_puts_area_and_task_back_on_all(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    monkeypatch.setattr(app, "render_view", lambda *args: "view")
+    pages = app._pages(CURRENT)
+    by_id = pages.state[0]
+
+    areas, tasks, board, shown = app._on_pill(
+        pages,
+        "single-cell-rna",
+        "bulk-rna",
+        "gastroenterology",
+        "endotype",
+        "hide",
+        "show",
+    )
+
+    assert areas == {"choices": app.area_choices(by_id, "bulk-rna"), "value": ALL}
+    assert tasks == {"choices": app.category_choices(by_id, "bulk-rna"), "value": ALL}
+    assert board.startswith('<span hidden data-view="bulk-rna|all|all|hide|show">')
+    assert shown == "bulk-rna"
+
+
+def test_a_pill_of_the_modality_on_screen_keeps_area_and_task(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    monkeypatch.setattr(app, "render_view", lambda *args: "view")
+    pages = app._pages(CURRENT)
+
+    areas, tasks, board, shown = app._on_pill(
+        pages, "bulk-rna", "bulk-rna", "gastroenterology", "endotype", "hide", "show"
+    )
+
+    assert (areas, tasks, shown) == ("skip", "skip", "bulk-rna")
+    assert board.startswith(
+        '<span hidden data-view="bulk-rna|gastroenterology|endotype|hide|show">'
+    )
 
 
 def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards):
@@ -440,6 +475,14 @@ def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards)
 
     assert isinstance(state, app.Pages)
     assert state.state[0] is registry
+
+
+def test_a_page_load_gives_the_modality_on_screen_to_the_pills(
+    monkeypatch, registry, boards
+):
+    page = _init(monkeypatch, registry, boards)
+
+    assert page[-1] == page[4]["value"] == "bulk-rna"
 
 
 class _InlineThread:
@@ -506,7 +549,7 @@ def test_the_warm_up_renders_every_view_once(monkeypatch):
 
     app._render_every_view(pages)
     for view in views:
-        assert app._render_view(pages, *view).endswith("view")
+        assert app._view_html(pages, *view).endswith("view")
 
     assert len(set(views)) == len(views) == 4 * 4 * 2 * 2
     assert len(rendered) == len(views)
@@ -678,15 +721,24 @@ def test_the_page_shows_one_loader_until_the_first_page_load_ends():
     )
 
 
-def test_a_pill_click_is_one_direct_request_and_the_last_click_wins():
+def test_every_pill_click_is_one_direct_request_and_the_last_click_wins():
     _check_the_space_build(
-        "names = ('_on_modality', '_render_view'); "
-        "fns = [fn for fn in demo.fns.values() if fn.name in names]; "
-        "modes = sorted("
-        "(fn.name, fn.queue, fn.trigger_mode, len(fn.targets)) for fn in fns); "
-        "assert modes == ["
-        "('_on_modality', False, 'always_last', 1), "
-        "('_render_view', False, 'always_last', 4)], modes"
+        "fns = [fn for fn in demo.fns.values() "
+        "if any(event == 'input' for _, event in fn.targets)]; "
+        "modes = [(fn.name, fn.queue, fn.trigger_mode, len(fn.targets)) "
+        "for fn in fns]; "
+        "assert modes == [('_on_pill', False, 'always_last', 5)], modes"
+    )
+
+
+def test_the_pills_read_and_write_the_modality_on_screen():
+    _check_the_space_build(
+        "fns = list(demo.fns.values()); "
+        "pill = next(fn for fn in fns if fn.name == '_on_pill'); "
+        "init = next(fn for fn in fns if fn.name == '_init'); "
+        "shown = pill.inputs[1]; "
+        "assert type(shown).__name__ == 'State', shown; "
+        "assert pill.outputs[-1] is shown and init.outputs[-1] is shown"
     )
 
 
@@ -703,22 +755,20 @@ def test_the_board_fades_until_it_shows_the_view_of_the_pills():
         "board = next(b for b in demo.blocks.values() "
         "if getattr(b, 'elem_id', None) == 'pm-board'); "
         "fns = list(demo.fns.values()); "
-        "names = ('_on_modality', '_render_view'); "
-        "pills = [fn._id for fn in fns if fn.name in names]; "
+        "pill = next(fn._id for fn in fns if fn.name == '_on_pill'); "
         "steps = [fn for fn in fns "
-        "if fn.trigger_after in pills and fn.js == app.VIEW_URL_JS]; "
-        "assert [fn.inputs[-1]._id for fn in steps] == [board._id] * 2, steps"
+        "if fn.trigger_after == pill and fn.js == app.VIEW_URL_JS]; "
+        "assert [fn.inputs[-1]._id for fn in steps] == [board._id], steps"
     )
 
 
 def test_a_failed_pill_click_clears_the_fade():
     _check_the_space_build(
         "fns = list(demo.fns.values()); "
-        "pills = [fn for fn in fns if fn.name in ('_on_modality', '_render_view')]; "
-        "failure = {fn.trigger_after: fn.js for fn in fns "
-        "if fn.trigger_only_on_failure}; "
-        "steps = [failure.get(fn._id) for fn in pills]; "
-        "assert steps == [app.CLEAR_LOADING_JS] * 2, steps"
+        "pill = next(fn._id for fn in fns if fn.name == '_on_pill'); "
+        "steps = [fn.js for fn in fns "
+        "if fn.trigger_after == pill and fn.trigger_only_on_failure]; "
+        "assert steps == [app.CLEAR_LOADING_JS], steps"
     )
 
 
