@@ -25,7 +25,6 @@ gradio_stub.Request = object
 gradio_stub.Blocks = object
 gradio_stub.Tabs = lambda selected: selected
 gradio_stub.Radio = lambda **kwargs: kwargs
-gradio_stub.skip = lambda: "skip"
 sys.modules["gradio"] = gradio_stub
 app = importlib.import_module("app")
 if previous_gradio is None:
@@ -225,6 +224,7 @@ def _init(monkeypatch, registry, boards, **query):
     )
     monkeypatch.setattr(app, "results_hash", lambda token: ("hash-1", "commit-1"))
     monkeypatch.setattr(app, "PAGES_BY_VERSION", {})
+    monkeypatch.setattr(app, "_render_every_view", lambda pages: None)
     monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
     return app._init(SimpleNamespace(query_params=query))
 
@@ -264,8 +264,21 @@ def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
     assert [pill["value"] for pill in pills] == ["bulk-rna", ALL, ALL]
 
 
-def test_a_pill_clicked_before_the_page_loads_changes_nothing():
-    assert app._render_view(None, "bulk-rna", ALL, ALL, "show", "show") == "skip"
+def test_a_session_without_pages_asks_for_a_reload():
+    board = app._render_view(None, "bulk-rna", "dermatology", ALL, "hide", "show")
+    area, task, modality_board = app._on_modality(
+        None, "single-cell-rna", "show", "hide"
+    )
+
+    assert board == (
+        '<span hidden data-view="bulk-rna|dermatology|all|hide|show"></span>'
+        + app.RELOAD_NOTE
+    )
+    assert area == task == {"value": ALL}
+    assert modality_board == (
+        '<span hidden data-view="single-cell-rna|all|all|show|hide"></span>'
+        + app.RELOAD_NOTE
+    )
 
 
 def _counted_builds(monkeypatch, registry: dict) -> list:
@@ -405,9 +418,21 @@ def test_a_view_is_rendered_once_per_results_file(monkeypatch):
     pages = app._pages(CURRENT)
 
     for hvg in ("show", "show", "hide"):
-        assert app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show") == "view"
+        html = app._render_view(pages, "bulk-rna", ALL, ALL, hvg, "show")
+        assert html.endswith("view")
 
     assert len(rendered) == 2
+
+
+def test_a_view_starts_with_a_marker_of_its_pills(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    monkeypatch.setattr(app, "render_view", lambda *args: "view")
+    pages = app._pages(CURRENT)
+
+    html = app._render_view(pages, "bulk-rna", ALL, ALL, "hide", "show")
+
+    assert html == '<span hidden data-view="bulk-rna|all|all|hide|show"></span>view'
 
 
 def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards):
@@ -415,6 +440,140 @@ def test_a_page_load_gives_its_pages_to_the_pills(monkeypatch, registry, boards)
 
     assert isinstance(state, app.Pages)
     assert state.state[0] is registry
+
+
+class _InlineThread:
+    """A thread that runs its target as soon as it starts."""
+
+    def __init__(self, target, args, daemon):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)
+
+
+def _warm_ups(monkeypatch) -> list:
+    """Run each warm-up at once, and record the pages it renders."""
+    started = []
+    monkeypatch.setattr(app, "threading", SimpleNamespace(Thread=_InlineThread))
+    monkeypatch.setattr(app, "_render_every_view", started.append)
+    monkeypatch.setattr(app.gr, "Tabs", lambda **kwargs: kwargs, raising=False)
+    return started
+
+
+def _page_load() -> "app.Pages":
+    """The pages that one page load gives to the pills."""
+    return app._init(SimpleNamespace(query_params={}))[9]
+
+
+def _counted_renders(monkeypatch) -> list:
+    """Record each view rendered from scratch."""
+    rendered = []
+    monkeypatch.setattr(
+        app, "render_view", lambda *args: rendered.append(args) or "view"
+    )
+    return rendered
+
+
+def test_new_pages_render_every_view_after_their_first_page_load(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    hashes = iter([("a", "commit-a"), ("a", "commit-a"), ("b", "commit-b")])
+    monkeypatch.setattr(app, "results_hash", lambda token: next(hashes))
+    started = _warm_ups(monkeypatch)
+
+    first, second, third = [_page_load() for _ in range(3)]
+
+    assert second is first
+    assert started == [first, third]
+
+
+def test_the_warm_up_starts_after_the_view_of_the_page_load(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    _warm_ups(monkeypatch)
+    steps = []
+    monkeypatch.setattr(
+        app, "render_view", lambda *args: steps.append("view") or "view"
+    )
+    monkeypatch.setattr(
+        app, "_render_every_view", lambda pages: steps.append("warm-up")
+    )
+
+    _page_load()
+
+    assert steps == ["view", "warm-up"]
+
+
+def test_pages_that_are_not_kept_render_no_other_view(monkeypatch):
+    _counted_builds(monkeypatch, {})
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    started = _warm_ups(monkeypatch)
+
+    _page_load()
+
+    assert started == []
+
+
+def test_the_warm_up_renders_every_view_once(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    rendered = _counted_renders(monkeypatch)
+    pages = app._pages(CURRENT)
+    views = app._views_of(pages.state[0])
+
+    app._render_every_view(pages)
+    for view in views:
+        assert app._render_view(pages, *view).endswith("view")
+
+    assert len(set(views)) == len(views) == 4 * 4 * 2 * 2
+    assert len(rendered) == len(views)
+
+
+def test_the_views_nearest_the_default_view_render_first():
+    default = ("bulk-rna", ALL, ALL, "show", "show")
+    views = app._views_of(dict(REGISTRY))
+    clicks = [
+        sum(pill != usual for pill, usual in zip(view, default)) for view in views
+    ]
+
+    assert views[0] == default
+    assert clicks == sorted(clicks)
+
+
+def test_the_warm_up_stops_once_newer_pages_are_kept(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    pages = app._pages(CURRENT)
+    newer = app._built_pages(pages.state, "b")
+    rendered = []
+
+    def render_view(*args):
+        rendered.append(args)
+        app.PAGES_BY_VERSION[CURRENT.number] = newer
+        return "view"
+
+    monkeypatch.setattr(app, "render_view", render_view)
+    app._render_every_view(pages)
+
+    assert len(rendered) == 1
+
+
+def test_a_view_that_fails_does_not_stop_the_warm_up(monkeypatch):
+    _counted_builds(monkeypatch, dict(REGISTRY))
+    monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
+    pages = app._pages(CURRENT)
+    rendered = []
+
+    def render_view(*args):
+        rendered.append(args)
+        if len(rendered) == 1:
+            raise RuntimeError("one view fails")
+        return "view"
+
+    monkeypatch.setattr(app, "render_view", render_view)
+    app._render_every_view(pages)
+
+    assert len(rendered) == len(app._views_of(pages.state[0]))
 
 
 def test_the_public_tasks_pill_shows_only_when_a_task_is_public(
@@ -533,6 +692,50 @@ def test_the_page_shows_one_loader_until_the_first_page_load_ends():
         "assert init.show_progress == 'hidden', init.show_progress; "
         "after = [fn.js for fn in fns if fn.trigger_after == init._id]; "
         "assert app.PAGE_READY_JS in after, after"
+    )
+
+
+def test_a_pill_click_is_one_direct_request_and_the_last_click_wins():
+    _check_the_space_build(
+        "names = ('_on_modality', '_render_view'); "
+        "fns = [fn for fn in demo.fns.values() if fn.name in names]; "
+        "modes = sorted("
+        "(fn.name, fn.queue, fn.trigger_mode, len(fn.targets)) for fn in fns); "
+        "assert modes == ["
+        "('_on_modality', False, 'always_last', 1), "
+        "('_render_view', False, 'always_last', 4)], modes"
+    )
+
+
+def test_the_board_fades_until_it_shows_the_view_of_the_pills():
+    css = Path(app.CSS_PATH).read_text()
+
+    assert 'event.target.closest("#pm-controls")' in app.TABLE_SORT_JS
+    assert 'classList.add("pm-loading")' in app.TABLE_SORT_JS
+    assert '[modality, area, task, hvg, pub].join("|")' in app.VIEW_URL_JS
+    assert 'board?.includes(`data-view="${view}"`)' in app.VIEW_URL_JS
+    assert 'classList.remove("pm-loading")' in app.VIEW_URL_JS
+    assert "html.pm-loading #pm-board { opacity: .5;" in css
+    _check_the_space_build(
+        "board = next(b for b in demo.blocks.values() "
+        "if getattr(b, 'elem_id', None) == 'pm-board'); "
+        "fns = list(demo.fns.values()); "
+        "names = ('_on_modality', '_render_view'); "
+        "pills = [fn._id for fn in fns if fn.name in names]; "
+        "steps = [fn for fn in fns "
+        "if fn.trigger_after in pills and fn.js == app.VIEW_URL_JS]; "
+        "assert [fn.inputs[-1]._id for fn in steps] == [board._id] * 2, steps"
+    )
+
+
+def test_a_failed_pill_click_clears_the_fade():
+    _check_the_space_build(
+        "fns = list(demo.fns.values()); "
+        "pills = [fn for fn in fns if fn.name in ('_on_modality', '_render_view')]; "
+        "failure = {fn.trigger_after: fn.js for fn in fns "
+        "if fn.trigger_only_on_failure}; "
+        "steps = [failure.get(fn._id) for fn in pills]; "
+        "assert steps == [app.CLEAR_LOADING_JS] * 2, steps"
     )
 
 

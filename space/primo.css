@@ -171,6 +171,7 @@ footer { display: none !important; }
 #pm-site .pm-seg--main [data-testid="block-info"] { color: var(--pm-ink) !important; }
 #pm-site .pm-seg--minor label { font-size: 12.5px !important; padding: 6px 10px !important; min-height: 28px; }
 #pm-site .pm-seg--minor [data-testid="block-info"] { font-style: italic !important; }
+html.pm-loading #pm-board { opacity: .5; transition: opacity .2s ease .15s; }
 
 /* ---------- tables ---------- */
 .pm-card { background: var(--pm-surface); border: 1px solid var(--pm-line); border-radius: var(--pm-r-card); min-width: 0; }
