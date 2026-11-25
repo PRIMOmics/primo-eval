@@ -481,10 +481,8 @@ def ranked_table(
             "Institution": entry["institution"] or None,
             "Elo": round(entry["elo"]),
             "Mean rank": _round(entry["mean_rank"]),
-            # Blank for baselines and ``+ HVG`` entries: we republish and re-sync
-            # those, so their count measures our release cadence, not anyone tuning.
             "Submissions count": (
-                None if entry["is_baseline"] or is_hvg else entry["n_submissions"]
+                None if entry["is_baseline"] else entry["n_submissions"]
             ),
         }
         for cat in columns:

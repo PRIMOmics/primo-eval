@@ -69,9 +69,9 @@ its own tasks.
 that model was resubmitted, not how many files were uploaded. A model that
 covered twenty tasks across twenty submissions reads 1, because each task was
 submitted once; a model that sent the same task five times reads 5. It shows
-n/a for our baselines and the `+ HVG` rows, which we republish ourselves. A
-published result can be corrected, so a 2 or 3 is ordinary; a high number on
-one task is worth a second look.
+n/a for our baselines, which we republish ourselves. A published result can be
+corrected, so a 2 or 3 is ordinary; a high number on one task is worth a second
+look.
 
 ## How the results are organised
 

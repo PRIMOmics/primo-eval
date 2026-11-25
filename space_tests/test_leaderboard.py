@@ -547,13 +547,12 @@ def test_a_baseline_shows_no_submission_count(registry, named, flagged_results):
     assert pd.isna(board.loc[0, "Submissions count"])
 
 
-def test_an_hvg_entry_shows_no_submission_count(registry, named, results):
-    """Each ``+ HVG`` re-sync appends rows; the number would measure our releases."""
+def test_an_hvg_entry_shows_its_submission_count(registry, named, results):
     df = results(*_full("m + HVG", "2026-01-01"), *_full("m + HVG", "2026-02-01"))
 
     board = ranked_table(df, registry, named("bulk RNA"))
 
-    assert pd.isna(board.loc[0, "Submissions count"])
+    assert board.loc[0, "Submissions count"] == 2
 
 
 def test_credits_come_from_the_most_recent_of_the_accumulated_submissions(
