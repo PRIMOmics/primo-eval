@@ -11,6 +11,7 @@ from leaderboard import (
     TASK_COLUMNS,
     _entries,
     _paired_splits,
+    best_of_hvg,
     latest_only,
     per_task_table,
     ranked_table,
@@ -412,6 +413,58 @@ def test_without_the_anchor_the_ratings_centre_on_1000(registry, named, results)
     )
     board = ranked_table(df, registry, named("bulk RNA"))
     assert board["Elo"].mean() == pytest.approx(1000, abs=1)
+
+
+def test_best_keeps_the_entry_of_each_model_with_more_elo(
+    registry, named, flagged_results
+):
+    df = flagged_results(
+        *_anchor("2026-01-01", scores=(0.5,) * 5),
+        *_flagged("eva", "2026-01-01", False, scores=(0.4,) * 5),
+        *_flagged("eva + HVG", "2026-01-01", False, scores=(0.9,) * 5),
+        *_flagged("foo", "2026-01-01", False, scores=(0.8,) * 5),
+        *_flagged("foo + HVG", "2026-01-01", False, scores=(0.6,) * 5),
+    )
+
+    best = best_of_hvg(df, registry, named("bulk RNA"))
+
+    assert set(best["model_name"]) == {ELO_ANCHOR_MODEL, "eva + HVG", "foo"}
+
+
+def test_best_keeps_the_plain_entry_on_a_tie(registry, named, results):
+    df = results(*_full("eva", "2026-01-01"), *_full("eva + HVG", "2026-01-01"))
+
+    best = best_of_hvg(df, registry, named("bulk RNA"))
+
+    assert set(best["model_name"]) == {"eva"}
+
+
+def test_best_keeps_the_ranked_entry_when_the_other_is_not(registry, named, results):
+    df = results(
+        *_full("eva", "2026-01-01"),
+        ("eva + HVG", "t901", 0.99, "2026-01-01"),
+        ("foo", "t901", 0.99, "2026-01-01"),
+        *_full("foo + HVG", "2026-01-01"),
+        ("bar", "t901", 0.99, "2026-01-01"),
+        ("bar + HVG", "t901", 0.99, "2026-01-01"),
+    )
+
+    best = best_of_hvg(df, registry, named("bulk RNA"))
+
+    assert set(best["model_name"]) == {"eva", "foo + HVG", "bar"}
+
+
+def test_best_picks_again_on_each_board(registry, named, results):
+    df = results(
+        *_full("eva", "2026-01-01", scores=(0.4, 0.4, 0.4, 0.4, 0.9)),
+        *_full("eva + HVG", "2026-01-01", scores=(0.9, 0.9, 0.9, 0.9, 0.4)),
+    )
+
+    gastroenterology = best_of_hvg(df, registry, named("Gastroenterology"))
+    rheumatology = best_of_hvg(df, registry, named("Rheumatology"))
+
+    assert set(gastroenterology["model_name"]) == {"eva + HVG"}
+    assert set(rheumatology["model_name"]) == {"eva"}
 
 
 def test_tasks_table_shows_biology_but_never_provenance(registry):

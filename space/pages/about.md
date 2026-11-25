@@ -49,8 +49,10 @@ embedding concatenated with the `HVG-1200-genes` features of each sample. The
 embedding is scaled to unit length, the 1,200 log-normalized genes are appended,
 and the concatenated row is scaled to unit length again before the same probe.
 It shows whether a model adds information that expression alone does not carry.
-These rows are shown by default; set **+ HVG models** to **Hide** to hide them,
-which re-ranks the board and refits Elo without them.
+The **+ HVG models** pill sets the rows of a view. **Show** keeps both rows of
+each model. **Best**, the default, keeps the one of the two rows with the higher
+Elo under Show. **Hide** removes the `+ HVG` rows. Elo is always fit on the rows
+that the view shows.
 
 Elo orders the rows. Each task family keeps its own column, in its own metric,
 and no column averages across metrics.

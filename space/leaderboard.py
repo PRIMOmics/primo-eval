@@ -34,6 +34,7 @@ from results import (
     PAPER_LINK,
     SUBMISSION_ID,
     display_name,
+    hvg_name,
     split_hvg_name,
     with_author_submission_flag,
     with_baseline_flag,
@@ -494,6 +495,28 @@ def ranked_table(
     table = pd.DataFrame(rows)
     table["Submissions count"] = table["Submissions count"].astype("Int64")
     return table
+
+
+def best_of_hvg(df: pd.DataFrame, by_id: dict[str, dict], board: Board) -> pd.DataFrame:
+    """Keep, of each model and its ``+ HVG`` entry, the one with more Elo on ``board``.
+
+    Both entries play in the same fit. A ranked entry beats an unranked one. The
+    plain entry stays on a tie, and when neither entry is ranked. Baselines stay.
+    """
+    elo = {
+        str(entry["model_name"]): entry["elo"]
+        for entry in _entries(df, by_id, board)
+        if not entry["is_baseline"]
+    }
+    flagged = with_baseline_flag(df)
+    kept = []
+    for model, is_baseline in zip(
+        flagged[MODEL_NAME].astype(str), flagged[IS_BASELINE]
+    ):
+        parent, is_hvg = split_hvg_name(model)
+        hvg_wins = elo.get(hvg_name(parent), -math.inf) > elo.get(parent, -math.inf)
+        kept.append(bool(is_baseline) or is_hvg == hvg_wins)
+    return df[np.array(kept, dtype=bool)]
 
 
 RESERVED_COLUMNS = frozenset({"Task", "Family", "Area", "Modality", "Metric", "Best"})
