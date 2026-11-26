@@ -556,13 +556,14 @@ def test_an_hvg_entry_shows_no_submission_count(registry, named, results):
     assert pd.isna(board.loc[0, "Submissions count"])
 
 
+@pytest.mark.parametrize("old_link", ["", "https://example.org/old"])
 def test_credits_come_from_the_most_recent_of_the_accumulated_submissions(
-    registry, named, results
+    registry, named, results, old_link
 ):
-    """A later submission can add a paper link without resending every task."""
+    """A later submission can add or change a paper link without resending every task."""
     rows = _full("m", "2026-01-01")
     first = results(*rows[:3]).assign(
-        submission_id="first", institution="Old Lab", paper_link=""
+        submission_id="first", institution="Old Lab", paper_link=old_link
     )
     second = results(*rows[3:]).assign(
         submission_id="second",
@@ -577,17 +578,18 @@ def test_credits_come_from_the_most_recent_of_the_accumulated_submissions(
     assert board.loc[0, "Model"].paper_link == "https://example.org/p"
 
 
+@pytest.mark.parametrize("institution", ["", "Lab A"])
 def test_correcting_one_task_with_blank_credits_keeps_the_earlier_ones(
-    registry, named, results
+    registry, named, results, institution
 ):
-    """A one-task fix resubmits with the credit fields blank; it must not wipe them."""
+    """A one-task fix sends no paper link and no Authors check; it must not wipe them."""
     full = results(*_full("m", "2026-01-01")).assign(
         institution="Lab A",
         paper_link="https://example.org/p",
         is_author_submission=True,
     )
     fix = results(("m", "t901", 0.11, "2026-02-01")).assign(
-        institution="", paper_link="", is_author_submission=False
+        institution=institution, paper_link="", is_author_submission=False
     )
 
     board = ranked_table(pd.concat([full, fix]), registry, named("bulk RNA"))
