@@ -359,6 +359,9 @@ def logged_in(monkeypatch):
     monkeypatch.setattr(cli, "get_token", lambda: "hf_test")
 
 
+METHOD = "An autoencoder trained on public bulk atlases, no PRIMO data."
+
+
 def _submit(submission, data_dir, *extra):
     return cli.main(
         [
@@ -370,6 +373,10 @@ def _submit(submission, data_dir, *extra):
             "model-901",
             "--email",
             "me@example.org",
+            "--institution",
+            "Example University",
+            "--notes",
+            METHOD,
             "--data-dir",
             str(data_dir),
             *extra,
@@ -388,6 +395,8 @@ def test_submit_sends_a_checked_file(
     [call] = fake_space.calls
     assert call["fields"]["submission_path"]["path"] == str(submission)
     assert call["fields"]["is_author_submission"] is True
+    assert call["fields"]["institution"] == "Example University"
+    assert call["fields"]["notes"] == METHOD
     assert "scored and published" in caplog.text
     assert "Submission id: s-901" in caplog.text
 
@@ -469,6 +478,89 @@ def test_submit_stops_on_a_failed_check(
 
     assert code == 1
     assert fake_space.calls == []
+
+
+@pytest.mark.parametrize(
+    ("given", "missing"),
+    [
+        (["--notes", METHOD], "--institution"),
+        (["--institution", "Example University"], "--notes"),
+    ],
+)
+def test_submit_requires_an_institution_and_a_method(capsys, given, missing):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(
+            [
+                "submit",
+                "sub.parquet",
+                "--modality",
+                "bulk-rna",
+                "--model-name",
+                "model-901",
+                "--email",
+                "me@example.org",
+                *given,
+            ]
+        )
+
+    assert exit_info.value.code == 1
+    assert f"required: {missing}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "error"),
+    [
+        ("--institution", " ", "--institution needs"),
+        ("--institution", "n/a", "--institution needs"),
+        ("--notes", "x" * (cli.MIN_METHOD_LENGTH - 1), "--notes is too short"),
+    ],
+)
+def test_submit_refuses_an_empty_institution_or_a_short_method(
+    fake_hub,
+    fake_space,
+    logged_in,
+    public_tasks,
+    local_data,
+    tmp_path,
+    caplog,
+    option,
+    value,
+    error,
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data, option, value)
+
+    assert code == 1
+    assert fake_space.calls == []
+    assert error in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "field"),
+    [
+        ("--institution", "MIT", "institution"),
+        ("--notes", "x" * cli.MIN_METHOD_LENGTH, "notes"),
+    ],
+)
+def test_submit_takes_the_minimum_lengths(
+    fake_hub,
+    fake_space,
+    logged_in,
+    public_tasks,
+    local_data,
+    tmp_path,
+    option,
+    value,
+    field,
+):
+    submission = write_submission(tmp_path / "sub.parquet", signal_blocks())
+
+    code = _submit(submission, local_data, option, value)
+
+    assert code == 0
+    [call] = fake_space.calls
+    assert call["fields"][field] == value
 
 
 def test_submit_refuses_a_file_over_the_limit_of_the_space(

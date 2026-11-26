@@ -11,9 +11,9 @@ Two rules hold everywhere:
 * Every string that comes from the registry or from a submission goes through
   ``html.escape`` -- board names, blurbs, disease names and, above all, the
   user-chosen model names that become table cells and column headers.
-* New submissions can carry a public institution, author-submission check and paper
-  link. Private legacy ``hf_username`` values stay hidden. Public strings and
-  links are validated and escaped before rendering.
+* New submissions carry a public institution, and can carry an author-submission
+  check and a paper link. Private legacy ``hf_username`` values stay hidden.
+  Public strings and links are validated and escaped before rendering.
 
 Pages are ``<a href="?tab=name">`` links in the top bar; the page script in
 ``app.py`` switches the page without a reload when the link stays on the same board

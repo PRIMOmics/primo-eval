@@ -29,8 +29,8 @@ The public tasks are the exception: their labels and responses are published in
 the public data repo, and the pages tag them ``Public``.
 Naming the accession behind ``d002`` would put every label one GEO download
 away, so ``sources`` is collapsed to its archive (NCBI GEO / EMBL-EBI
-ArrayExpress) and ``citation`` is never rendered at all. Submitters can publish
-an optional institution, paper link and an author-submission check; legacy private
+ArrayExpress) and ``citation`` is never rendered at all. Submitters publish an
+institution, and can add a paper link and an author-submission check; legacy private
 usernames remain hidden.
 
 Failures are surfaced by who owns them: a bad file tells the submitter exactly
@@ -120,6 +120,8 @@ from results import (
 from submit_api import (
     ERROR,
     MAX_FILE_SIZE,
+    MIN_INSTITUTION_LETTERS,
+    MIN_METHOD_LENGTH,
     PUBLISHED,
     REFUSED,
     SUBMISSIONS,
@@ -561,6 +563,16 @@ def run_submission(
         return _refuse("Please enter a model name.")
     if not email or not email.strip():
         return _refuse("Please enter a contact email.")
+    if sum(char.isalpha() for char in institution or "") < MIN_INSTITUTION_LETTERS:
+        return _refuse(
+            f"Please enter your institution ({MIN_INSTITUTION_LETTERS} letters or "
+            "more), or Independent."
+        )
+    if len((notes or "").strip()) < MIN_METHOD_LENGTH:
+        return _refuse(
+            f"Please describe your method in {MIN_METHOD_LENGTH} characters or "
+            "more: the model, its training data, and any PRIMO data it saw."
+        )
     model = model_name.strip()
     if BASELINE_TAG in model.lower():
         return _refuse(
@@ -954,8 +966,8 @@ def build_demo() -> gr.Blocks:
                                     info="Shown on the leaderboard.",
                                 )
                                 institution_tb = gr.Textbox(
-                                    label="Institution (optional)",
-                                    placeholder="e.g. Example University",
+                                    label="Institution",
+                                    placeholder="e.g. Example University, or Independent",
                                     info="Shown on the leaderboard.",
                                 )
                                 author_submission_cb = gr.Checkbox(
@@ -968,9 +980,13 @@ def build_demo() -> gr.Blocks:
                                     info="Contact for this submission, kept private.",
                                 )
                                 notes_tb = gr.Textbox(
-                                    label="Training data / notes (optional)",
-                                    placeholder="e.g. pretrained on atlas X",
-                                    info="About the model or its training data.",
+                                    label="Method",
+                                    placeholder="e.g. pretrained on atlas X, no PRIMO data",
+                                    info=(
+                                        "The model, its training data, and any PRIMO "
+                                        f"data it saw. {MIN_METHOD_LENGTH} characters "
+                                        "or more, kept private."
+                                    ),
                                 )
                                 paper_tb = gr.Textbox(
                                     label="Paper link (optional)",
