@@ -281,8 +281,9 @@ def _is_anchor(model: str, is_baseline: bool) -> bool:
 def _credit_row(rows: pd.DataFrame) -> pd.Series:
     """The most recent slot carrying an institution or a paper link.
 
-    Its paper link and Authors check fall back to the earlier slots, so a later
-    submission that leaves them blank does not clear them.
+    Its paper link and Authors check fall back to the entry's other slots, so a
+    later partial submission that leaves them blank does not clear them. A full
+    resubmission replaces every slot, so it replaces these credits too.
     """
     credited = rows[(rows[INSTITUTION] != "") | (rows[PAPER_LINK] != "")]
     credits = (credited if not credited.empty else rows).iloc[-1].copy()

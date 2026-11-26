@@ -98,7 +98,7 @@ def test_latest_submission_wins_so_scores_cannot_be_shopped(registry, named, res
     assert board.loc[0, "Treatment outcome (AUROC)"] == pytest.approx(0.1)
 
 
-def test_equal_timestamp_submissions_do_not_mix_scores_or_credits(
+def test_equal_timestamp_full_submissions_do_not_mix_scores_or_credits(
     registry, named, results
 ):
     older = results(*_full("m", "2026-02-01", scores=(0.9,) * 5)).assign(
@@ -595,6 +595,29 @@ def test_correcting_one_task_with_blank_credits_keeps_the_earlier_ones(
     board = ranked_table(pd.concat([full, fix]), registry, named("bulk RNA"))
 
     assert board.loc[0, "Institution"] == "Lab A"
+    assert board.loc[0, "Model"].paper_link == "https://example.org/p"
+    assert board.loc[0, "Model"].is_author_submission is True
+
+
+def test_a_later_partial_submission_can_add_the_authors_check(registry, named, results):
+    """The Authors check of a later partial submission shows with the earlier link."""
+    rows = _full("m", "2026-01-01")
+    first = results(*rows[:3]).assign(
+        submission_id="first",
+        institution="Lab A",
+        paper_link="https://example.org/p",
+        is_author_submission=False,
+    )
+    second = results(*rows[3:]).assign(
+        submission_id="second",
+        institution="Lab A",
+        paper_link="",
+        is_author_submission=True,
+    )
+    second["submitted_at"] = "2026-02-01"
+
+    board = ranked_table(pd.concat([first, second]), registry, named("bulk RNA"))
+
     assert board.loc[0, "Model"].paper_link == "https://example.org/p"
     assert board.loc[0, "Model"].is_author_submission is True
 
