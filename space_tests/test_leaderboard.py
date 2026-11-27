@@ -104,21 +104,21 @@ def test_equal_timestamp_full_submissions_do_not_mix_scores_or_credits(
     older = results(*_full("m", "2026-02-01", scores=(0.9,) * 5)).assign(
         submission_id="2026-02-01T00:00:00.000001-a",
         institution="Older University",
-        is_author_submission=False,
+        is_author_submission=True,
         paper_link="https://example.org/older",
     )
     newer = results(*_full("m", "2026-02-01", scores=(0.1,) * 5)).assign(
         submission_id="2026-02-01T00:00:00.000002-b",
         institution="Newer University",
-        is_author_submission=True,
-        paper_link="https://example.org/newer",
+        is_author_submission=False,
+        paper_link="",
     )
     board = ranked_table(pd.concat([older, newer]), registry, named("bulk RNA"))
     assert board.loc[0, "Treatment outcome (AUROC)"] == pytest.approx(0.1)
     assert "Author" not in board
     assert board.loc[0, "Institution"] == "Newer University"
-    assert board.loc[0, "Model"].paper_link == "https://example.org/newer"
-    assert board.loc[0, "Model"].is_author_submission is True
+    assert board.loc[0, "Model"].paper_link == ""
+    assert board.loc[0, "Model"].is_author_submission is False
 
 
 def test_one_submission_can_be_completed_at_a_later_timestamp(registry, named, results):
