@@ -275,6 +275,16 @@ def test_the_hvg_pill_opens_on_best_unless_the_link_asks(monkeypatch, registry, 
     assert 'hvg: "best"' in app.VIEW_URL_JS
 
 
+def test_hovering_best_says_which_row_each_model_keeps():
+    assert '#pm-hvg [data-testid="Best-radio-label"]' in app.TABLE_SORT_JS
+    assert "whichever has the higher Elo on this view." in app.TABLE_SORT_JS
+    _check_the_space_build(
+        "pill = next(b for b in demo.blocks.values() "
+        "if getattr(b, 'elem_id', None) == 'pm-hvg'); "
+        "assert ('Best', 'best') in pill.choices, pill.choices"
+    )
+
+
 def test_a_session_without_pages_asks_for_a_reload():
     click = app._on_pill(None, None, "bulk-rna", "dermatology", ALL, "hide", "show")
 

@@ -305,6 +305,12 @@ TABLE_SORT_JS = """
     if (!event.target.closest("#pm-controls")) return;
     document.documentElement.classList.add("pm-loading");
   });
+  document.addEventListener("mouseover", (event) => {
+    const best = event.target.closest('#pm-hvg [data-testid="Best-radio-label"]');
+    if (!best) return;
+    best.title = "One row per model: its plain row or its + HVG row, " +
+      "whichever has the higher Elo on this view.";
+  });
 
   const showTab = (tab) => {
     const button = Array.from(
@@ -921,6 +927,7 @@ def build_demo() -> gr.Blocks:
                             HVG_CHOICES,
                             value=BEST,
                             label="+ HVG models",
+                            elem_id="pm-hvg",
                             elem_classes=["pm-seg", "pm-seg--minor"],
                         )
                         public_f = gr.Radio(
