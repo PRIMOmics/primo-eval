@@ -676,6 +676,12 @@ def run_submission(
         summary += f"\n\n⚠️ scored, but the embedding archive was not saved: {error}"
         return reply(ERROR, summary)
     try:
+        append_submission(meta, TOKEN)
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        summary += f"\n\n⚠️ archived, but the submission details were not saved: {error}"
+        return reply(ERROR, summary, submission_id)
+    try:
         append_results(rows, TOKEN)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
@@ -685,11 +691,6 @@ def run_submission(
     summary += f"\n\n✅ **{model} is now shown on the relevant boards.**"
     if hvg_rows:
         summary += f" So is **{hvg_name(model)}**."
-    try:
-        append_submission(meta, TOKEN)
-    except Exception as error:  # noqa: BLE001
-        traceback.print_exc()
-        summary += f"\n\n⚠️ Contact metadata was not saved: {error}"
     return reply(PUBLISHED, summary, submission_id)
 
 

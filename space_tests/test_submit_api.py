@@ -191,6 +191,19 @@ def test_the_token_is_never_kept_or_shown(space, capsys, caplog):
     assert unknown not in seen
 
 
+def test_a_failed_save_of_the_method_publishes_no_scores(space, monkeypatch):
+    def fail(meta, token):
+        raise RuntimeError("Hub unavailable")
+
+    monkeypatch.setattr(app, "append_submission", fail)
+
+    reply = route(app.run_submission)(**FIELDS)
+
+    assert reply["status"] == ERROR
+    assert space.rows == []
+    assert "submission details were not saved" in reply["message"]
+
+
 @pytest.fixture
 def hub(monkeypatch):
     """The real ``whoami`` on a fake Hub, in a Space that holds ``SPACE_TOKEN``.
