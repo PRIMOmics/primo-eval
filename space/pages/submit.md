@@ -19,7 +19,7 @@ python quickstart.py --modality bulk-rna --out submission.parquet
 1. **Choose one modality** → use the selector in the form. The quickstart
    downloads only its datasets from [PRIMOmics/primo](https://huggingface.co/datasets/PRIMOmics/primo).
 2. **Embed that modality** → build **one** file: `dataset_id`, `sample_id`, then one column per embedding dim (`e0`, `e1`, …). CSV / TSV / Parquet, or NPZ.
-3. **Sign in, fill the form, and hit Evaluate.** Add an institution for group submissions, check **Submitted by the model's authors** when applicable, and provide a paper link to make the model name clickable. A fixed task probe scores each task (AUROC, Pearson or centered Spearman), reported per task category in its native metric.
+3. **Sign in, fill the form, and hit Evaluate.** Give your institution (or Independent) and describe your method. Check **Submitted by the model's authors** when applicable, and provide a paper link to make the model name clickable. A fixed task probe scores each task (AUROC, Pearson or centered Spearman), reported per task category in its native metric.
 
 ### Or with the command line
 
@@ -43,6 +43,10 @@ exactly one embedding per unique `sample_id`; the submission schema is unchanged
 
 **Limits.** An account can publish 4 submissions in 24 hours. A submission file
 can weigh 500 MB at most.
+
+**Rules.** The leaderboard evaluates the representations of a model. The
+maintainers read the method of each submission. They can remove an entry, or group
+several variants of one model into one entry. By submitting, you accept these rules.
 
 Files containing dataset IDs from another modality are rejected. **Partial
 submissions are welcome, and they add up.** Cover fewer datasets and you are still

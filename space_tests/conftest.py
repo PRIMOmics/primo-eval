@@ -24,6 +24,8 @@ CLOSED = Version(
 
 RESULT_ROW = ["model_name", "task_id", "score", "submitted_at"]
 
+METHOD = "An autoencoder trained on public bulk atlases, no PRIMO data."
+
 REGISTRY = {
     "t901": {
         "task_id": "t901",

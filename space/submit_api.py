@@ -16,6 +16,9 @@ refuses such a payload.
 
 An account can publish ``SUBMISSIONS_PER_DAY`` submissions in 24 hours, through
 the form and the endpoint together. A file can weigh ``MAX_FILE_SIZE`` at most.
+Each submission gives an institution of ``MIN_INSTITUTION_LETTERS`` letters or
+more, and describes its method in ``notes`` in ``MIN_METHOD_LENGTH`` characters or
+more.
 The form and the endpoint share the ``SUBMISSIONS`` queue, so one submission runs
 at a time.
 """
@@ -41,6 +44,8 @@ ERROR = "error"
 SUBMISSIONS = "submissions"
 SUBMISSIONS_PER_DAY = 4
 MAX_FILE_SIZE = 500_000_000
+MIN_INSTITUTION_LETTERS = 3
+MIN_METHOD_LENGTH = 50
 SUBMITTED_AT = "%Y-%m-%d %H:%M:%S.%f"
 FILE_DATA = "gradio.FileData"
 

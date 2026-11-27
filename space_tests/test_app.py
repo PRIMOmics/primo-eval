@@ -13,7 +13,7 @@ import pytest
 from boards import ALL, build_boards
 from versions import CURRENT
 
-from .conftest import CLOSED, REGISTRY
+from .conftest import CLOSED, METHOD, REGISTRY
 
 previous_gradio = sys.modules.get("gradio")
 gradio_stub = ModuleType("gradio")
@@ -107,7 +107,7 @@ def _evaluate(
         "person@example.org",
         "",
         "",
-        "",
+        METHOD,
         SimpleNamespace(username="submitter"),
     )
 
@@ -161,7 +161,7 @@ def test_owned_model_name_does_not_reveal_owner(monkeypatch):
         "person@example.org",
         "",
         "",
-        "",
+        METHOD,
         SimpleNamespace(username="submitter"),
     )
 

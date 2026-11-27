@@ -49,7 +49,15 @@ from primomics.evaluate import (
     score_all,
 )
 from primomics.submission import DATASET_ID, norm_id
-from primomics.submit import MAX_FILE_BYTES, PUBLISHED, REFUSED, SPACE, submit
+from primomics.submit import (
+    MAX_FILE_BYTES,
+    MIN_INSTITUTION_LETTERS,
+    MIN_METHOD_LENGTH,
+    PUBLISHED,
+    REFUSED,
+    SPACE,
+    submit,
+)
 from primomics.tasks import PUBLIC_TASKS, load_tasks_registry
 
 LOGISTIC_MODULE = "sklearn.linear_model._logistic"
@@ -274,6 +282,17 @@ def _evaluate(args: argparse.Namespace) -> None:
 
 def _submit(args: argparse.Namespace) -> None:
     """Run ``primo submit``."""
+    if sum(char.isalpha() for char in args.institution) < MIN_INSTITUTION_LETTERS:
+        raise SubmissionError(
+            f"--institution needs {MIN_INSTITUTION_LETTERS} letters or more: give "
+            "your lab, or Independent"
+        )
+    if len(args.notes.strip()) < MIN_METHOD_LENGTH:
+        raise SubmissionError(
+            f"--notes is too short: describe your method in {MIN_METHOD_LENGTH} "
+            "characters or more (the model, its training data, and any PRIMO data "
+            "it saw)"
+        )
     verdicts, manifest = _checked(args)
     size = Path(args.submission).stat().st_size
     if size > MAX_FILE_BYTES:
@@ -402,7 +421,11 @@ def _parser() -> argparse.ArgumentParser:
     send.add_argument(
         "--email", required=True, help="a contact for this submission, kept private"
     )
-    send.add_argument("--institution", default="", help="shown on the leaderboard")
+    send.add_argument(
+        "--institution",
+        required=True,
+        help="your lab, or Independent; shown on the leaderboard",
+    )
     send.add_argument(
         "--authors", action="store_true", help="the model's authors submit it"
     )
@@ -413,7 +436,12 @@ def _parser() -> argparse.ArgumentParser:
         "--hf-model", default="", help="the model's page on the Hugging Face Hub"
     )
     send.add_argument(
-        "--notes", default="", help="about the model or its training data"
+        "--notes",
+        required=True,
+        help=(
+            "your method: the model, its training data, and any PRIMO data it saw "
+            f"({MIN_METHOD_LENGTH} characters or more, kept private)"
+        ),
     )
     send.add_argument(
         "--dry-run", action="store_true", help="run every check, send nothing"

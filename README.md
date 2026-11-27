@@ -220,9 +220,11 @@ and send it:
 ```bash
 uv run hf auth login
 uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
-  --model-name my-model --email me@lab.org --dry-run
+  --model-name my-model --email me@example.org --institution "My Lab" \
+  --notes "An autoencoder trained on public bulk atlases, no PRIMO data" --dry-run
 uv run primo submit ../my-model/submission.parquet --modality bulk-rna \
-  --model-name my-model --email me@lab.org
+  --model-name my-model --email me@example.org --institution "My Lab" \
+  --notes "An autoencoder trained on public bulk atlases, no PRIMO data"
 ```
 
 `primo submit` runs the checks of `primo evaluate`, and checks that each dataset of
@@ -234,19 +236,23 @@ every task, the private ones included, and publishes the scores. Scoring takes a
 minutes. The Space reads your Hugging Face token only to know who submits, and
 never stores it: a model name stays with the account that first used it. An
 account can publish 4 submissions in 24 hours, and a file can weigh 500 MB at
-most. `--institution`, `--authors`,
-`--paper-link`, `--hf-model` and `--notes` fill the other fields of the web form.
+most. Give your lab in `--institution` (or Independent), and describe your method
+in `--notes`, in 50 characters or more: the model, its training data, and any PRIMO
+data it saw. `--authors`, `--paper-link` and `--hf-model` fill the other fields of
+the web form.
 
 #### 🌐 In the browser
 
 Open the
 [**Submit** tab](https://huggingface.co/spaces/PRIMOmics/primo-eval?tab=submit) of the
 leaderboard Space, and sign in with Hugging Face. Choose the modality, enter a model
-name and a contact email, and upload the file. The other fields are optional. Then
-click **Evaluate**: after a few minutes, your scores show on the boards.
+name, your institution, a contact email and your method, and upload the file. The
+other fields are optional. Then click **Evaluate**: after a few minutes, your scores
+show on the boards.
 
-The Submit tab also gives the rules: partial submissions, new submissions under the
-same name, and the `+ HVG` entry that comes with each submission.
+The Submit tab gives the rules that you accept when you submit. It also explains
+partial submissions, new submissions under the same name, and the `+ HVG` entry
+that comes with each submission.
 
 ## 📏 Reproduce the baseline
 

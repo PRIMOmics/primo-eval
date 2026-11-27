@@ -279,9 +279,19 @@ def _is_anchor(model: str, is_baseline: bool) -> bool:
 
 
 def _credit_row(rows: pd.DataFrame) -> pd.Series:
-    """The most recent slot carrying an institution or a paper link."""
+    """The most recent slot carrying an institution or a paper link.
+
+    Its paper link and Authors check fall back to the entry's other slots, so a
+    later partial submission that leaves them blank does not clear them. A full
+    resubmission replaces every slot, so it replaces these credits too.
+    """
     credited = rows[(rows[INSTITUTION] != "") | (rows[PAPER_LINK] != "")]
-    return (credited if not credited.empty else rows).iloc[-1]
+    credits = (credited if not credited.empty else rows).iloc[-1].copy()
+    links = rows.loc[rows[PAPER_LINK] != "", PAPER_LINK]
+    if not links.empty:
+        credits[PAPER_LINK] = links.iloc[-1]
+    credits[IS_AUTHOR_SUBMISSION] = bool(rows[IS_AUTHOR_SUBMISSION].any())
+    return credits
 
 
 def _entries(df: pd.DataFrame, by_id: dict[str, dict], board: Board) -> list[dict]:

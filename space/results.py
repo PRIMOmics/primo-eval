@@ -14,7 +14,7 @@ a row pushed to the bottom of the table would hide exactly that.
 each name's LATEST rows: without an owner, anyone could supersede another team's
 ranked entry by sending a one-task file under their model name. The Submit form
 refuses a name somebody else already claimed. New submissions separately store
-an optional public ``institution``, an author-submission flag and a paper link;
+a public ``institution``, an author-submission flag and a paper link;
 legacy owners remain private. Historical ``team`` values are read as institutions.
 
 Rows written before these columns existed carry no column at all, so every

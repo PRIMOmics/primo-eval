@@ -98,27 +98,27 @@ def test_latest_submission_wins_so_scores_cannot_be_shopped(registry, named, res
     assert board.loc[0, "Treatment outcome (AUROC)"] == pytest.approx(0.1)
 
 
-def test_equal_timestamp_submissions_do_not_mix_scores_or_credits(
+def test_equal_timestamp_full_submissions_do_not_mix_scores_or_credits(
     registry, named, results
 ):
     older = results(*_full("m", "2026-02-01", scores=(0.9,) * 5)).assign(
         submission_id="2026-02-01T00:00:00.000001-a",
         institution="Older University",
-        is_author_submission=False,
+        is_author_submission=True,
         paper_link="https://example.org/older",
     )
     newer = results(*_full("m", "2026-02-01", scores=(0.1,) * 5)).assign(
         submission_id="2026-02-01T00:00:00.000002-b",
         institution="Newer University",
-        is_author_submission=True,
-        paper_link="https://example.org/newer",
+        is_author_submission=False,
+        paper_link="",
     )
     board = ranked_table(pd.concat([older, newer]), registry, named("bulk RNA"))
     assert board.loc[0, "Treatment outcome (AUROC)"] == pytest.approx(0.1)
     assert "Author" not in board
     assert board.loc[0, "Institution"] == "Newer University"
-    assert board.loc[0, "Model"].paper_link == "https://example.org/newer"
-    assert board.loc[0, "Model"].is_author_submission is True
+    assert board.loc[0, "Model"].paper_link == ""
+    assert board.loc[0, "Model"].is_author_submission is False
 
 
 def test_one_submission_can_be_completed_at_a_later_timestamp(registry, named, results):
@@ -555,13 +555,14 @@ def test_an_hvg_entry_shows_its_submission_count(registry, named, results):
     assert board.loc[0, "Submissions count"] == 2
 
 
+@pytest.mark.parametrize("old_link", ["", "https://example.org/old"])
 def test_credits_come_from_the_most_recent_of_the_accumulated_submissions(
-    registry, named, results
+    registry, named, results, old_link
 ):
-    """A later submission can add a paper link without resending every task."""
+    """A later submission can add or change a paper link without resending every task."""
     rows = _full("m", "2026-01-01")
     first = results(*rows[:3]).assign(
-        submission_id="first", institution="Old Lab", paper_link=""
+        submission_id="first", institution="Old Lab", paper_link=old_link
     )
     second = results(*rows[3:]).assign(
         submission_id="second",
@@ -576,22 +577,46 @@ def test_credits_come_from_the_most_recent_of_the_accumulated_submissions(
     assert board.loc[0, "Model"].paper_link == "https://example.org/p"
 
 
+@pytest.mark.parametrize("institution", ["", "Lab A"])
 def test_correcting_one_task_with_blank_credits_keeps_the_earlier_ones(
-    registry, named, results
+    registry, named, results, institution
 ):
-    """A one-task fix resubmits with the credit fields blank; it must not wipe them."""
+    """A one-task fix sends no paper link and no Authors check; it must not wipe them."""
     full = results(*_full("m", "2026-01-01")).assign(
         institution="Lab A",
         paper_link="https://example.org/p",
         is_author_submission=True,
     )
     fix = results(("m", "t901", 0.11, "2026-02-01")).assign(
-        institution="", paper_link="", is_author_submission=False
+        institution=institution, paper_link="", is_author_submission=False
     )
 
     board = ranked_table(pd.concat([full, fix]), registry, named("bulk RNA"))
 
     assert board.loc[0, "Institution"] == "Lab A"
+    assert board.loc[0, "Model"].paper_link == "https://example.org/p"
+    assert board.loc[0, "Model"].is_author_submission is True
+
+
+def test_a_later_partial_submission_can_add_the_authors_check(registry, named, results):
+    """The Authors check of a later partial submission shows with the earlier link."""
+    rows = _full("m", "2026-01-01")
+    first = results(*rows[:3]).assign(
+        submission_id="first",
+        institution="Lab A",
+        paper_link="https://example.org/p",
+        is_author_submission=False,
+    )
+    second = results(*rows[3:]).assign(
+        submission_id="second",
+        institution="Lab A",
+        paper_link="",
+        is_author_submission=True,
+    )
+    second["submitted_at"] = "2026-02-01"
+
+    board = ranked_table(pd.concat([first, second]), registry, named("bulk RNA"))
+
     assert board.loc[0, "Model"].paper_link == "https://example.org/p"
     assert board.loc[0, "Model"].is_author_submission is True
 

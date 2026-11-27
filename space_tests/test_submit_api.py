@@ -19,12 +19,16 @@ from submit_api import (
     ERROR,
     FILE_DATA,
     MAX_FILE_SIZE,
+    MIN_INSTITUTION_LETTERS,
+    MIN_METHOD_LENGTH,
     PUBLISHED,
     REFUSED,
     SUBMISSIONS_PER_DAY,
     SUBMITTED_AT,
     route,
 )
+
+from .conftest import METHOD
 
 CLIENT = Path(__file__).parents[1] / "src" / "primomics" / "submit.py"
 ALICE = "hf_alice_secret_901"
@@ -36,12 +40,12 @@ FIELDS = {
     "submission_path": UPLOAD,
     "modality": "bulk-rna",
     "model_name": "model-901",
-    "institution": "",
+    "institution": "Example University",
     "is_author_submission": False,
     "email": "person@example.org",
     "paper_link": "",
     "hf_model_link": "",
-    "notes": "",
+    "notes": METHOD,
     "token": ALICE,
 }
 
@@ -187,6 +191,19 @@ def test_the_token_is_never_kept_or_shown(space, capsys, caplog):
     assert unknown not in seen
 
 
+def test_a_failed_save_of_the_method_publishes_no_scores(space, monkeypatch):
+    def fail(meta, token):
+        raise RuntimeError("Hub unavailable")
+
+    monkeypatch.setattr(app, "append_submission", fail)
+
+    reply = route(app.run_submission)(**FIELDS)
+
+    assert reply["status"] == ERROR
+    assert space.rows == []
+    assert "submission details were not saved" in reply["message"]
+
+
 @pytest.fixture
 def hub(monkeypatch):
     """The real ``whoami`` on a fake Hub, in a Space that holds ``SPACE_TOKEN``.
@@ -289,8 +306,40 @@ def test_an_account_publishes_a_few_submissions_per_day(space, published_today, 
         assert f"{SUBMISSIONS_PER_DAY} submissions in 24 hours" in alice["message"]
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "refusal"),
+    [
+        ("institution", " ", "Please enter your institution"),
+        ("institution", "n/a", "Please enter your institution"),
+        ("notes", " " * MIN_METHOD_LENGTH, "Please describe your method"),
+        ("notes", "x" * (MIN_METHOD_LENGTH - 1), "Please describe your method"),
+    ],
+)
+def test_a_submission_needs_an_institution_and_a_method(space, field, value, refusal):
+    reply = route(app.run_submission)(**{**FIELDS, field: value})
+
+    assert reply["status"] == REFUSED
+    assert refusal in reply["message"]
+    assert space.scored == space.archived == space.rows == space.meta == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("institution", "MIT"), ("notes", "x" * MIN_METHOD_LENGTH)],
+)
+def test_the_minimum_lengths_are_enough(space, field, value):
+    reply = route(app.run_submission)(**{**FIELDS, field: value})
+
+    assert reply["status"] == PUBLISHED
+
+
 def test_primo_submit_knows_the_file_limit_of_the_space():
     assert _client_constant("MAX_FILE_BYTES") == MAX_FILE_SIZE
+
+
+def test_primo_submit_knows_the_minimum_lengths_of_the_space():
+    assert _client_constant("MIN_INSTITUTION_LETTERS") == MIN_INSTITUTION_LETTERS
+    assert _client_constant("MIN_METHOD_LENGTH") == MIN_METHOD_LENGTH
 
 
 def test_the_submit_page_gives_the_limits():
