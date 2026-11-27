@@ -265,6 +265,26 @@ def test_an_unknown_pill_falls_back_to_all(monkeypatch, registry, boards):
     assert [pill["value"] for pill in pills] == ["bulk-rna", ALL, ALL]
 
 
+def test_the_hvg_pill_opens_on_best_unless_the_link_asks(monkeypatch, registry, boards):
+    pills = [
+        _init(monkeypatch, registry, boards, **query)[7]["value"]
+        for query in ({}, {"hvg": "show"}, {"hvg": "hide"}, {"hvg": "other"})
+    ]
+
+    assert pills == ["best", "show", "hide", "best"]
+    assert 'hvg: "best"' in app.VIEW_URL_JS
+
+
+def test_hovering_best_says_which_row_each_model_keeps():
+    assert '#pm-hvg [data-testid="Best-radio-label"]' in app.TABLE_SORT_JS
+    assert "whichever has the higher Elo on this view." in app.TABLE_SORT_JS
+    _check_the_space_build(
+        "pill = next(b for b in demo.blocks.values() "
+        "if getattr(b, 'elem_id', None) == 'pm-hvg'); "
+        "assert ('Best', 'best') in pill.choices, pill.choices"
+    )
+
+
 def test_a_session_without_pages_asks_for_a_reload():
     click = app._on_pill(None, None, "bulk-rna", "dermatology", ALL, "hide", "show")
 
@@ -431,6 +451,53 @@ def test_a_view_starts_with_a_marker_of_its_pills(monkeypatch):
     assert html == '<span hidden data-view="bulk-rna|all|all|hide|show"></span>view'
 
 
+def _rendered_models(monkeypatch, scores: dict[str, tuple], views) -> list[set]:
+    """The models each of ``views`` renders, from one score per registry task."""
+    registry = dict(REGISTRY)
+    df = pd.DataFrame(
+        [
+            {
+                "model_name": model,
+                "task_id": task_id,
+                "score": score,
+                "submitted_at": "2026-01-01",
+                "is_baseline": False,
+            }
+            for model, task_scores in scores.items()
+            for task_id, score in zip(registry, task_scores)
+        ]
+    )
+    pages = app._built_pages((registry, build_boards(registry), df, CURRENT), "a")
+    rows = []
+    monkeypatch.setattr(
+        app,
+        "render_view",
+        lambda board, df, by_id, name: rows.append(set(df["model_name"])) or "view",
+    )
+    for view in views:
+        app._view_html(pages, *view)
+    return rows
+
+
+def test_the_hvg_pill_sets_the_rows_of_the_view(monkeypatch):
+    scores = {"eva": (0.5,) * 5, "eva + HVG": (0.9,) * 5, "foo": (0.7,) * 5}
+    views = [("bulk-rna", ALL, ALL, hvg, "show") for hvg in ("show", "best", "hide")]
+
+    rows = _rendered_models(monkeypatch, scores, views)
+
+    assert rows == [{"eva", "eva + HVG", "foo"}, {"eva + HVG", "foo"}, {"eva", "foo"}]
+
+
+def test_best_chooses_on_the_tasks_the_view_shows(monkeypatch):
+    """``t904`` is public: hiding it turns a tie into a win of the ``+ HVG`` row."""
+    scores = {"eva": (0.4, 0.4, 0.9, 0.9, 0.5), "eva + HVG": (0.9, 0.9, 0.4, 0.4, 0.5)}
+    views = [("bulk-rna", ALL, ALL, "best", public) for public in ("show", "hide")]
+
+    rows = _rendered_models(monkeypatch, scores, views)
+
+    assert rows == [{"eva"}, {"eva + HVG"}]
+
+
 def test_a_new_modality_puts_area_and_task_back_on_all(monkeypatch):
     _counted_builds(monkeypatch, dict(REGISTRY))
     monkeypatch.setattr(app, "results_hash", lambda token: ("a", "commit-a"))
@@ -568,12 +635,12 @@ def test_the_warm_up_renders_every_view_once(monkeypatch):
     for view in views:
         assert app._view_html(pages, *view).endswith("view")
 
-    assert len(set(views)) == len(views) == 4 * 4 * 2 * 2
+    assert len(set(views)) == len(views) == 4 * 4 * 3 * 2
     assert len(rendered) == len(views)
 
 
 def test_the_views_nearest_the_default_view_render_first():
-    default = ("bulk-rna", ALL, ALL, "show", "show")
+    default = ("bulk-rna", ALL, ALL, "best", "show")
     views = app._views_of(dict(REGISTRY))
     clicks = [
         sum(pill != usual for pill, usual in zip(view, default)) for view in views

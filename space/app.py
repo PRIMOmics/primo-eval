@@ -83,7 +83,7 @@ from evaluator import (
     score_all,
     scoreable_tasks,
 )
-from leaderboard import RESERVED_COLUMNS, source_repositories
+from leaderboard import RESERVED_COLUMNS, best_of_hvg, source_repositories
 from render import (
     CREDIT,
     VERSION_PARAM,
@@ -116,6 +116,7 @@ from results import (
     results_hash,
     task_rows,
     version_rows,
+    without_hvg,
 )
 from submit_api import (
     ERROR,
@@ -154,10 +155,12 @@ TAB_IDS = ("leaderboard", "tasks", "submit", "contribute", "method")
 LEGACY_TABS = {"boards": "leaderboard", "board": "leaderboard"}
 DEFAULT_MODALITY = "bulk-rna"
 SHOW = "show"
+BEST = "best"
 HIDE = "hide"
 TOGGLE_CHOICES = [("Show", SHOW), ("Hide", HIDE)]
-DEFAULT_VIEW = (DEFAULT_MODALITY, ALL, ALL, SHOW, SHOW)
-VIEW_CACHE_SIZE = 512
+HVG_CHOICES = [("Show", SHOW), ("Best", BEST), ("Hide", HIDE)]
+DEFAULT_VIEW = (DEFAULT_MODALITY, ALL, ALL, BEST, SHOW)
+VIEW_CACHE_SIZE = 1024
 
 THEME = gr.themes.Base(
     font=[gr.themes.LocalFont("IBM Plex Sans", weights=(400, 700)), "sans-serif"],
@@ -173,7 +176,7 @@ VIEW_URL_JS = """
   const url = new URL(window.location.href);
   const values = { modality, area, task, hvg, public: pub };
   const defaults = {
-    modality: "bulk-rna", area: "all", task: "all", hvg: "show", public: "show",
+    modality: "bulk-rna", area: "all", task: "all", hvg: "best", public: "show",
   };
   for (const [key, value] of Object.entries(values)) {
     if (!value || value === defaults[key]) url.searchParams.delete(key);
@@ -301,6 +304,12 @@ TABLE_SORT_JS = """
   document.addEventListener("input", (event) => {
     if (!event.target.closest("#pm-controls")) return;
     document.documentElement.classList.add("pm-loading");
+  });
+  document.addEventListener("mouseover", (event) => {
+    const best = event.target.closest('#pm-hvg [data-testid="Best-radio-label"]');
+    if (!best) return;
+    best.title = "One row per model: its plain row or its + HVG row, " +
+      "whichever has the higher Elo on this view.";
   });
 
   const showTab = (tab) => {
@@ -771,8 +780,12 @@ def _view_html(
     board = view_board(by_id, modality, area, category)
     if public == HIDE:
         board = without_public(board, by_id)
+    if hvg == HIDE:
+        df = without_hvg(df)
+    elif hvg == BEST:
+        df = best_of_hvg(df, by_id, board)
     name = _view_name(by_id, modality, area, category)
-    tables = render_view(board, df, by_id, name, hvg != HIDE)
+    tables = render_view(board, df, by_id, name)
     return _marker(modality, area, category, hvg, public) + tables
 
 
@@ -783,7 +796,7 @@ def _views_of(by_id: dict[str, dict]) -> list[View]:
         for _, modality in modality_choices(by_id)
         for _, area in area_choices(by_id, modality)
         for _, category in category_choices(by_id, modality)
-        for hvg in (SHOW, HIDE)
+        for hvg in (SHOW, BEST, HIDE)
         for public in (SHOW, HIDE)
     ]
     return sorted(
@@ -866,7 +879,7 @@ def _init(request: gr.Request):
     by_id, boards, _, version = pages.state
     tab = _landing_tab(params)
     modality, area, category = _initial_view(params, by_id, boards)
-    hvg = HIDE if params.get("hvg") == HIDE else SHOW
+    hvg = params["hvg"] if params.get("hvg") in (SHOW, HIDE) else BEST
     public = HIDE if params.get("public") == HIDE else SHOW
     page = (
         gr.Tabs(selected=tab),
@@ -911,9 +924,10 @@ def build_demo() -> gr.Blocks:
                             label="Task", elem_classes=["pm-seg", "pm-seg--line"]
                         )
                         hvg_f = gr.Radio(
-                            TOGGLE_CHOICES,
-                            value=SHOW,
+                            HVG_CHOICES,
+                            value=BEST,
                             label="+ HVG models",
+                            elem_id="pm-hvg",
                             elem_classes=["pm-seg", "pm-seg--minor"],
                         )
                         public_f = gr.Radio(

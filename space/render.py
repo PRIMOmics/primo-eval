@@ -52,7 +52,6 @@ from results import (
     MODEL_NAME,
     split_hvg_name,
     with_baseline_flag,
-    without_hvg,
 )
 from versions import CURRENT, VERSIONS, Version
 
@@ -802,10 +801,8 @@ def render_view(
     df: pd.DataFrame,
     by_id: dict[str, dict],
     view_name: str,
-    show_hvg: bool,
 ) -> str:
     """One view: its size, its ranking, then its per-task scores."""
-    rows = df if show_hvg else without_hvg(df)
     head = _view_head(board, view_name)
     if not by_id:
         return (
@@ -817,11 +814,11 @@ def render_view(
             f'<div class="pm-card">{head}<p class="pm-empty">No task in this view '
             "yet. Pick another therapeutic area or task.</p></div>"
         )
-    ranked = _ranked_html(ranked_table(rows, by_id, board))
+    ranked = _ranked_html(ranked_table(df, by_id, board))
     return (
         f'<div class="pm-card">{head}{ranked}</div>'
         + RANKED_NOTE
-        + _per_task_details(per_task_table(rows, by_id, board), by_id, board)
+        + _per_task_details(per_task_table(df, by_id, board), by_id, board)
     )
 
 

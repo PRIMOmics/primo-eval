@@ -32,10 +32,10 @@ from versions import CURRENT
 from .conftest import CLOSED
 
 
-def _view(registry, df, area=ALL, task=ALL, show_hvg=True, name="Bulk RNAseq"):
+def _view(registry, df, area=ALL, task=ALL, name="Bulk RNAseq"):
     """The bulk view of ``area`` and ``task``, as the leaderboard page shows it."""
     board = view_board(registry, "bulk-rna", area, task)
-    return render_view(board, df, registry, name, show_hvg)
+    return render_view(board, df, registry, name)
 
 
 def _ranked(html: str) -> str:
@@ -44,10 +44,6 @@ def _ranked(html: str) -> str:
 
 def _per_task(html: str) -> str:
     return html.split('class="pm-more"')[1]
-
-
-def _first_row(html: str) -> str:
-    return re.search(r"<tbody><tr[^>]*>(.*?)</tr>", _ranked(html)).group(1)
 
 
 # ------------------------------------------------------------------ the view
@@ -74,7 +70,7 @@ def test_a_view_without_tasks_says_so(registry, results):
 
 
 def test_an_unreachable_registry_is_not_an_empty_view(results):
-    html = render_view(view_board({}, "bulk-rna", ALL, ALL), results(), {}, "", True)
+    html = render_view(view_board({}, "bulk-rna", ALL, ALL), results(), {}, "")
 
     assert "The task registry could not be loaded" in html
     assert "No task in this view yet" not in html
@@ -94,7 +90,7 @@ def test_a_view_keeps_its_modality_apart(registry, results):
     board = view_board(registry, "single-cell-rna", ALL, "endotype")
     df = results(("m", "t905", 0.5, "2026-01-01"), ("m", "t906", 0.6, "2026-01-01"))
 
-    html = render_view(board, df, registry, "Single-cell RNAseq", True)
+    html = render_view(board, df, registry, "Single-cell RNAseq")
 
     assert "Single-cell RA endotype" in html
     assert "RA blood endotype" not in html
@@ -305,23 +301,6 @@ def test_hvg_entry_shows_its_parent_name_with_an_hvg_chip(registry, flagged_resu
     )
 
 
-def test_hiding_hvg_entries_reranks_the_view(registry, flagged_results):
-    df = flagged_results(
-        *[("eva", tid, 0.5, "2026-01-01", False) for tid in registry],
-        *[("eva + HVG", tid, 0.9, "2026-01-01", False) for tid in registry],
-        *[("foo", tid, 0.7, "2026-01-01", False) for tid in registry],
-    )
-
-    shown = _view(registry, df, area="gastroenterology")
-    hidden = _view(registry, df, area="gastroenterology", show_hvg=False)
-
-    assert "pm-tag--hvg" in _first_row(shown)
-    assert "pm-tag--hvg" not in _ranked(hidden)
-    assert 'data-sort-value="foo"' in _first_row(hidden)
-    assert ">eva + HVG</th>" in _per_task(shown)
-    assert "eva + HVG" not in _per_task(hidden)
-
-
 def _eva_skips_the_public_task(flagged_results, registry):
     """The anchor covers every task; ``eva`` skips the public ``t904``."""
     return flagged_results(
@@ -336,8 +315,8 @@ def test_hiding_public_tasks_ranks_a_model_that_skipped_only_them(
     df = _eva_skips_the_public_task(flagged_results, registry)
     board = view_board(registry, "bulk-rna", ALL, ALL)
 
-    every = render_view(board, df, registry, "Bulk RNAseq", True)
-    private = render_view(without_public(board, registry), df, registry, "", True)
+    every = render_view(board, df, registry, "Bulk RNAseq")
+    private = render_view(without_public(board, registry), df, registry, "")
 
     assert 'data-sort-value="eva"' not in _ranked(every)
     assert 'data-sort-value="eva"' in _ranked(private)
@@ -348,10 +327,8 @@ def test_hiding_public_tasks_ranks_a_model_that_skipped_only_them(
 def test_the_view_counts_follow_the_public_tasks_pill(registry, results):
     board = view_board(registry, "bulk-rna", ALL, ALL)
 
-    every = render_view(board, results(), registry, "", True)
-    private = render_view(
-        without_public(board, registry), results(), registry, "", True
-    )
+    every = render_view(board, results(), registry, "")
+    private = render_view(without_public(board, registry), results(), registry, "")
 
     assert "<b>5</b> tasks · <b>4</b> cohorts · <b>350</b> patients" in every
     assert "<b>4</b> tasks · <b>3</b> cohorts · <b>270</b> patients" in private
